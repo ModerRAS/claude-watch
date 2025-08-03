@@ -243,14 +243,25 @@ fn main() -> io::Result<()> {
     println!("开始监控 Claude Code 在 tmux pane {} 中的状态", var!("PANE"));
     println!("使用 LLM 后端: {}", var!("LLM_BACKEND"));
 
+    // 主监控循环
+    run_monitoring_loop(interval, stuck_sec, max_retry, &mut last_active, &mut retry_count)
+}
+
+fn run_monitoring_loop(
+    interval: u64,
+    stuck_sec: u64,
+    max_retry: usize,
+    last_active: &mut Instant,
+    retry_count: &mut usize,
+) -> io::Result<()> {
     loop {
         let text = capture();
         
         // 检查 Claude Code 是否仍在活动
         if is_claude_active(&text) {
             // Claude Code 仍在活动
-            last_active = Instant::now();
-            retry_count = 0;
+            *last_active = Instant::now();
+            *retry_count = 0;
             println!("🔄 Claude Code 正在工作中...");
         } else {
             // Claude Code 不活动，检查是否超时
@@ -259,22 +270,25 @@ fn main() -> io::Result<()> {
                 
                 match ask_llm_final_status(&text) {
                     Ok(TaskStatus::Done) => {
-                        println!("✅ LLM 确认任务已完成，退出监控");
-                        break;
+                        println!("✅ LLM 确认任务已完成，进入完成状态监控...");
+                        // 进入完成状态监控循环
+                        if monitor_completion_state().is_err() {
+                            println!("⚠️ 完成状态监控中断，重新开始正常监控");
+                        }
                     }
                     Ok(TaskStatus::Stuck) => {
                         println!("⚠️ LLM 确认任务卡住");
-                        if retry_count < max_retry {
-                            println!("重试 {}/{}", retry_count + 1, max_retry);
+                        if *retry_count < max_retry {
+                            println!("重试 {}/{}", *retry_count + 1, max_retry);
                             send_keys("Retry");
-                            retry_count += 1;
+                            *retry_count += 1;
                         } else {
                             println!("达到最大重试次数，发送 /compact");
                             send_keys("/compact");
-                            retry_count = 0;
+                            *retry_count = 0;
                         }
                         // 重置状态，重新开始监控
-                        last_active = Instant::now();
+                        *last_active = Instant::now();
                     }
                     Err(e) => {
                         eprintln!("⚠️ 状态判断失败: {}，等待下次检查", e);
@@ -290,6 +304,36 @@ fn main() -> io::Result<()> {
         
         thread::sleep(Duration::from_secs(interval));
     }
+}
+
+/// 原本实现：在 LLM 判断为 DONE 后立即退出程序
+/// 简化实现：持续监控完成状态，检测画面变化以决定是否重启监控
+/// 这是一个简化实现，将程序变为守护进程模式
+fn monitor_completion_state() -> Result<(), String> {
+    let mut last_hash = 0u64;
+    let mut check_count = 0usize;
     
-    Ok(())
+    println!("🔄 进入完成状态监控模式...");
+    
+    loop {
+        let text = capture();
+        let hash = seahash::hash(text.as_bytes());
+        
+        if hash != last_hash {
+            // 画面发生变化，说明 Claude Code 可能开始了新任务
+            println!("🔍 检测到画面变化，Claude Code 可能开始新任务");
+            return Ok(());
+        }
+        
+        last_hash = hash;
+        check_count += 1;
+        
+        // 每检查 10 次报告一次状态
+        if check_count % 10 == 0 {
+            println!("💤 仍在完成状态，持续监控中... (检查次数: {})", check_count);
+        }
+        
+        // 睡眠 60 秒（1 分钟）
+        thread::sleep(Duration::from_secs(60));
+    }
 }
