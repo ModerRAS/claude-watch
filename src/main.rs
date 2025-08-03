@@ -1,12 +1,11 @@
 use dotenvy::dotenv;
-use regex::Regex;
 use serde_json::{json, Value};
 use std::{
     env,
     io,
     process::Command,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 macro_rules! var {
@@ -29,27 +28,27 @@ fn capture() -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// 原本实现：复杂的启发式规则和多层判断
-/// 简化实现：基于读秒检测的核心逻辑
-/// 这是一个核心改进，通过读秒检测大幅减少 LLM 调用
-fn has_timer_running(text: &str) -> bool {
-    // 检测各种计时器格式
-    let timer_patterns = [
-        r"⏱\s*\d{1,2}:\d{2}",      // ⏱ 00:42
-        r"⌛\s*\d{1,2}:\d{2}",      // ⌛ 00:42
-        r"计时[：:]\s*\d+秒",        // 计时: 42秒
-        r"时间[：:]\s*\d+秒",        // 时间: 42秒
-        r"进度[：:]\s*\d+/\d+",      // 进度: 42/60
-        r"\[\d+%\]",                // [42%]
-        r"(\d+)%\s*完成",           // 42% 完成
-        r"正在处理",                 // 处理中
-        r"处理中",                  // 处理中
-        r"Working on",              // 英文处理中
-        r"In progress",             // 进行中
-    ];
+/// 原本实现：简单的字符串比较检测画面变化
+/// 简化实现：检测 Claude Code 特定的活动模式
+/// 这是一个简化实现，专注于 Claude Code 的特定输出格式
+fn is_claude_active(text: &str) -> bool {
+    // 检测 Claude Code 的特定活动模式：
+    // 1. 包含类似 "104s" 的时间格式（数字+s）
+    // 2. 包含 tokens 计数
+    // 3. 包含 "Processing" 或其他处理状态
     
-    let re = Regex::new(&timer_patterns.join("|")).unwrap();
-    re.is_match(text)
+    let lines: Vec<&str> = text.lines().collect();
+    for line in lines.iter().rev().take(10) {
+        // 检查是否有类似 "104s" 的格式
+        if line.contains('s') && line.chars().any(|c| c.is_ascii_digit()) {
+            // 检查是否在同一行有 tokens 计数或其他活动指示
+            if line.contains("tokens") || line.contains("Processing") || line.contains("↓") {
+                return true;
+            }
+        }
+    }
+    
+    false
 }
 
 /// 原本实现：复杂的混合状态判断
@@ -173,59 +172,64 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
         return TaskStatus::Stuck;
     }
     
-    // 默认认为卡住（因为读秒已经停止了）
+    // 默认认为卡住（因为画面已经停止变化了）
     TaskStatus::Stuck
 }
 
 fn main() -> io::Result<()> {
     dotenv().ok();
     let interval: u64 = var!("INTERVAL").parse().unwrap();
+    let stuck_sec: u64 = var!("STUCK_SEC").parse().unwrap();
     let max_retry: usize = var!("MAX_RETRY").parse().unwrap();
 
+    let mut last_active = Instant::now();
     let mut retry_count = 0usize;
-    let mut last_status = String::from("working");
 
     println!("开始监控 Claude Code 在 tmux pane {} 中的状态", var!("PANE"));
     println!("使用 LLM 后端: {}", var!("LLM_BACKEND"));
 
     loop {
         let text = capture();
-        let has_timer = has_timer_running(&text);
-
-        if has_timer {
-            // 有读秒，说明 Claude Code 还在工作
-            if last_status != "working" {
-                println!("🔄 检测到读秒恢复，Claude Code 继续工作");
-                last_status = "working".to_string();
-                retry_count = 0;
-            }
-            println!("⏱️ 读秒运行中，Claude Code 正在工作...");
+        
+        // 检查 Claude Code 是否仍在活动
+        if is_claude_active(&text) {
+            // Claude Code 仍在活动
+            last_active = Instant::now();
+            retry_count = 0;
+            println!("🔄 Claude Code 正在工作中...");
         } else {
-            // 没有读秒，立即调用 LLM 判断状态
-            println!("⏸️ 读秒停止，立即调用 LLM 判断状态...");
-            
-            match ask_llm_final_status(&text) {
-                Ok(TaskStatus::Done) => {
-                    println!("✅ LLM 确认任务已完成，退出监控");
-                    break;
-                }
-                Ok(TaskStatus::Stuck) => {
-                    println!("⚠️ LLM 确认任务卡住");
-                    if retry_count < max_retry {
-                        println!("重试 {}/{}", retry_count + 1, max_retry);
-                        send_keys("Retry");
-                        retry_count += 1;
-                    } else {
-                        println!("达到最大重试次数，发送 /compact");
-                        send_keys("/compact");
-                        retry_count = 0;
+            // Claude Code 不活动，检查是否超时
+            if last_active.elapsed() >= Duration::from_secs(stuck_sec) {
+                println!("⏸️ Claude Code 停止工作超过 {} 秒，调用 LLM 判断状态...", stuck_sec);
+                
+                match ask_llm_final_status(&text) {
+                    Ok(TaskStatus::Done) => {
+                        println!("✅ LLM 确认任务已完成，退出监控");
+                        break;
                     }
-                    last_status = "retry_sent".to_string();
+                    Ok(TaskStatus::Stuck) => {
+                        println!("⚠️ LLM 确认任务卡住");
+                        if retry_count < max_retry {
+                            println!("重试 {}/{}", retry_count + 1, max_retry);
+                            send_keys("Retry");
+                            retry_count += 1;
+                        } else {
+                            println!("达到最大重试次数，发送 /compact");
+                            send_keys("/compact");
+                            retry_count = 0;
+                        }
+                        // 重置状态，重新开始监控
+                        last_active = Instant::now();
+                    }
+                    Err(e) => {
+                        eprintln!("⚠️ 状态判断失败: {}，等待下次检查", e);
+                        // 等待更长时间再重试
+                        thread::sleep(Duration::from_secs(stuck_sec));
+                    }
                 }
-                Err(e) => {
-                    eprintln!("⚠️ 状态判断失败: {}，等待下次检查", e);
-                    last_status = "error".to_string();
-                }
+            } else {
+                let wait_time = stuck_sec - last_active.elapsed().as_secs();
+                println!("⏳ 等待 {} 秒后判断 Claude Code 状态...", wait_time);
             }
         }
         
