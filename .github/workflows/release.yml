@@ -11,6 +11,8 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
     - uses: actions/checkout@v4
@@ -23,11 +25,25 @@ jobs:
     - name: Build release
       run: cargo build --release
 
+    - name: Check if binary exists
+      run: |
+        ls -la target/release/
+        file target/release/claude-watch
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         files: target/release/claude-watch
         draft: false
         prerelease: false
+        body: |
+          Automated release created by GitHub Actions
+          
+          ## What's Changed
+          * Updated Claude Code activity detection
+          * Improved CI/CD workflows
+          
+          ## Assets
+          * `claude-watch` - Precompiled binary for Linux
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
