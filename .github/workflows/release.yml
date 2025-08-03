@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -28,7 +29,13 @@ jobs:
     - name: Check if binary exists
       run: |
         ls -la target/release/
-        file target/release/claude-watch
+        if [ -f "target/release/claude-watch" ]; then
+          file target/release/claude-watch
+          echo "Binary size: $(du -h target/release/claude-watch)"
+        else
+          echo "Error: Binary not found!"
+          exit 1
+        fi
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
@@ -44,6 +51,14 @@ jobs:
           * Improved CI/CD workflows
           
           ## Assets
-          * `claude-watch` - Precompiled binary for Linux
+          * `claude-watch` - Precompiled binary for Linux (x86_64)
+          
+          ## Installation
+          ```bash
+          # Download the binary
+          wget https://github.com/ModerRAS/claude-watch/releases/download/${{ github.ref_name }}/claude-watch
+          chmod +x claude-watch
+          ./claude-watch
+          ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
