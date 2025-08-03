@@ -51,9 +51,33 @@ fn is_claude_active(text: &str) -> bool {
     false
 }
 
+/// 原本实现：使用 ureq 手动构建 HTTP 请求发送到 Ollama API
+/// 简化实现：使用 ollama-rs 库提供的高级 API 接口
+/// 这是一个简化实现，替换了手动 HTTP 请求处理
+async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str) -> Result<String, String> {
+    // 初始化 Ollama 客户端（使用默认配置连接到本地服务）
+    let ollama = ollama_rs::Ollama::default();
+    
+    // 构建生成请求
+    let request = ollama_rs::generation::completion::request::GenerationRequest::new(
+        model.to_string(),
+        prompt_text.to_string(),
+    );
+    
+    // 发送请求并处理响应
+    match ollama.generate(request).await {
+        Ok(response) => {
+            Ok(response.response)
+        }
+        Err(e) => {
+            Err(format!("Ollama 调用失败: {}", e))
+        }
+    }
+}
+
 /// 原本实现：复杂的混合状态判断
-/// 简化实现：直接使用 LLM 判断最终状态
-/// 这是一个简化实现，移除了不必要的中间层
+/// 简化实现：直接使用 LLM 判断最终状态，集成 ollama-rs
+/// 这是一个简化实现，替换了手动 HTTP 请求处理
 fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
     let backend = var!("LLM_BACKEND");
     
@@ -63,29 +87,24 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
     }
     
     let prompt = include_str!("../prompt.md");
+    let full_prompt = format!("{}\n\n{}", prompt, text);
 
     match backend.as_str() {
         "ollama" => {
-            let url = var!("OLLAMA_URL");
-            let body = json!({
-                "model": "qwen3:7b-instruct-q4_K_M",
-                "prompt": format!("{}\n\n{}", prompt, text),
-                "stream": false,
-                "max_tokens": 4,
-                "temperature": 0.0
-            });
+            // 使用 tokio 运行时来执行异步函数
+            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
+            let model = "qwen3:7b-instruct-q4_K_M";
             
-            match ureq::post(&url).send_json(body) {
-                Ok(resp) => {
-                    let json: Value = resp.into_json().map_err(|e| e.to_string())?;
-                    let response = json["response"].as_str().unwrap_or("").trim();
+            match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, model)) {
+                Ok(response) => {
+                    let response = response.trim();
                     match response {
                         "DONE" => Ok(TaskStatus::Done),
                         "STUCK" => Ok(TaskStatus::Stuck),
                         _ => Err(format!("LLM 返回未知状态: {}", response)),
                     }
                 }
-                Err(e) => Err(format!("Ollama 调用失败: {}", e)),
+                Err(e) => Err(e),
             }
         }
         "openrouter" => {

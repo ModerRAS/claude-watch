@@ -97,11 +97,37 @@ LLM_BACKEND=none
 |---------|--------|------|
 | `PANE` | `%0` | 要监控的 tmux pane ID |
 | `INTERVAL` | `5` | 检查间隔（秒） |
+| `STUCK_SEC` | `60` | 无活动多久算卡住（秒） |
 | `MAX_RETRY` | `10` | 最大重试次数 |
 | `LLM_BACKEND` | `ollama` | LLM 后端：`ollama`、`openrouter`、`none` |
-| `OLLAMA_URL` | `http://localhost:11434/api/generate` | Ollama API 地址 |
+| `OLLAMA_MODEL` | `qwen3:7b-instruct-q4_K_M` | Ollama 模型名称 |
 | `OPENROUTER_KEY` | - | OpenRouter API 密钥 |
 | `OPENROUTER_MODEL` | `qwen/qwen3-7b-instruct` | OpenRouter 模型 |
+
+## Ollama 支持说明
+
+本项目使用 [ollama-rs](https://crates.io/crates/ollama-rs) 库来与 Ollama 服务进行交互：
+
+- 使用类型安全的 API 调用替代手动 HTTP 请求
+- 自动处理 JSON 序列化/反序列化
+- 提供更好的错误处理和诊断信息
+- 支持连接到本地或远程 Ollama 实例
+
+要使用 Ollama 后端：
+1. 安装并启动 [Ollama](https://ollama.com/)
+2. 拉取所需模型：`ollama pull qwen3:7b-instruct-q4_K_M`
+3. 设置环境变量：`LLM_BACKEND=ollama`
+
+## OpenRouter 支持说明
+
+要使用 OpenRouter 后端：
+1. 在 [OpenRouter](https://openrouter.ai/) 获取 API 密钥
+2. 设置环境变量：
+   ```bash
+   LLM_BACKEND=openrouter
+   OPENROUTER_KEY=sk-or-v1-xxx
+   OPENROUTER_MODEL=qwen/qwen3-7b-instruct  # 可选，默认模型
+   ```
 
 ## 故障处理
 
