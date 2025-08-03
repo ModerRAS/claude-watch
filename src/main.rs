@@ -52,17 +52,26 @@ fn is_claude_active(text: &str) -> bool {
 }
 
 /// 原本实现：使用 ureq 手动构建 HTTP 请求发送到 Ollama API
-/// 简化实现：使用 ollama-rs 库提供的高级 API 接口
-/// 这是一个简化实现，替换了手动 HTTP 请求处理
-async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str) -> Result<String, String> {
-    // 初始化 Ollama 客户端（使用默认配置连接到本地服务）
-    let ollama = ollama_rs::Ollama::default();
+/// 简化实现：使用 ollama-rs 库提供的高级 API 接口，支持自定义服务器地址和模型选项
+/// 这是一个简化实现，替换了手动 HTTP 请求处理并支持配置
+async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str, url: &str) -> Result<String, String> {
+    // 解析 URL 获取主机和端口
+    // 简化实现：解析 URL 为独立的主机和端口参数，符合 ollama-rs API 要求
+    let (host, port) = parse_ollama_url(url);
+    
+    // 初始化 Ollama 客户端（支持自定义服务器地址和端口）
+    let ollama = ollama_rs::Ollama::new(&host, port);
+    
+    // 设置模型选项以提高稳定性和一致性
+    let options = ollama_rs::models::ModelOptions::default()
+        .temperature(0.0)  // 确保确定性输出
+        .num_predict(4);   // 限制输出长度
     
     // 构建生成请求
     let request = ollama_rs::generation::completion::request::GenerationRequest::new(
         model.to_string(),
         prompt_text.to_string(),
-    );
+    ).options(options);
     
     // 发送请求并处理响应
     match ollama.generate(request).await {
@@ -71,6 +80,31 @@ async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str) -> Result<Str
         }
         Err(e) => {
             Err(format!("Ollama 调用失败: {}", e))
+        }
+    }
+}
+
+/// 原本实现：直接传递完整 URL 字符串给 Ollama::new
+/// 简化实现：解析 URL 为独立的主机和端口参数，符合 ollama-rs API 要求
+/// 这是一个简化实现，移除了复杂的 URL 解析逻辑
+fn parse_ollama_url(url: &str) -> (String, u16) {
+    // 移除协议前缀
+    let url = url.trim_start_matches("http://").trim_start_matches("https://");
+    
+    // 分割主机和端口
+    let parts: Vec<&str> = url.split(':').collect();
+    match parts.as_slice() {
+        [host, port_str] => {
+            let port = port_str.parse::<u16>().unwrap_or(11434);
+            (host.to_string(), port)
+        }
+        [host] => {
+            // 默认端口 11434
+            (host.to_string(), 11434)
+        }
+        _ => {
+            // 默认值
+            ("localhost".to_string(), 11434)
         }
     }
 }
@@ -94,8 +128,9 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
             // 使用 tokio 运行时来执行异步函数
             let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
             let model = "qwen3:7b-instruct-q4_K_M";
+            let url = var!("OLLAMA_URL");
             
-            match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, model)) {
+            match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, model, &url)) {
                 Ok(response) => {
                     let response = response.trim();
                     match response {
