@@ -7,22 +7,18 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use clap::Parser;
 
-macro_rules! var {
-    ($k:expr) => {
-        env::var($k).unwrap_or_else(|_| panic!("{} not set", $k))
-    };
-}
 
-fn send_keys(text: &str) {
+fn send_keys(text: &str, pane: &str) {
     let _ = Command::new("tmux")
-        .args(&["send-keys", "-t", &var!("PANE"), text, "C-m"])
+        .args(&["send-keys", "-t", pane, text, "C-m"])
         .status();
 }
 
-fn capture() -> String {
+fn capture(pane: &str) -> String {
     let out = Command::new("tmux")
-        .args(&["capture-pane", "-p", "-t", &var!("PANE")])
+        .args(&["capture-pane", "-p", "-t", pane])
         .output()
         .expect("tmux capture failed");
     String::from_utf8_lossy(&out.stdout).into_owned()
@@ -112,8 +108,7 @@ fn parse_ollama_url(url: &str) -> (String, u16) {
 /// 原本实现：复杂的混合状态判断
 /// 简化实现：直接使用 LLM 判断最终状态，集成 ollama-rs
 /// 这是一个简化实现，替换了手动 HTTP 请求处理
-fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
-    let backend = var!("LLM_BACKEND");
+fn ask_llm_final_status(text: &str, backend: &str) -> Result<TaskStatus, String> {
     
     if backend == "none" {
         // 如果禁用 LLM，使用简单的启发式判断
@@ -123,12 +118,12 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
     let prompt = include_str!("../prompt.md");
     let full_prompt = format!("{}\n\n{}", prompt, text);
 
-    match backend.as_str() {
+    match backend.as_ref() {
         "ollama" => {
             // 使用 tokio 运行时来执行异步函数
             let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
             let model = "qwen2.5:3b";
-            let url = var!("OLLAMA_URL");
+            let url = env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
             
             match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, model, &url)) {
                 Ok(response) => {
@@ -144,7 +139,7 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
         }
         "openrouter" => {
             let url = "https://openrouter.ai/api/v1/chat/completions";
-            let model = var!("OPENROUTER_MODEL");
+            let model = env::var("OPENROUTER_MODEL").unwrap_or_else(|_| "qwen/qwen-2.5-7b-instruct".to_string());
             let body = json!({
                 "model": if model.is_empty() { "qwen/qwen-2.5-7b-instruct" } else { model.as_str() },
                 "messages": [
@@ -156,7 +151,7 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
             });
             
             match ureq::post(&url)
-                .set("Authorization", &format!("Bearer {}", var!("OPENROUTER_KEY")))
+                .set("Authorization", &format!("Bearer {}", env::var("OPENROUTER_KEY").expect("OPENROUTER_KEY not set")))
                 .send_json(body) 
             {
                 Ok(resp) => {
@@ -231,31 +226,53 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
     TaskStatus::Stuck
 }
 
+/// 命令行参数配置
+/// 简化实现：使用clap解析命令行参数，替代环境变量
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// tmux pane ID (例如 %0 或 mysess:1.0)
+    #[arg(short, long)]
+    pane: String,
+
+    /// LLM 后端选择 [ollama, openrouter, none]
+    #[arg(short, long, default_value = "ollama")]
+    backend: String,
+
+    /// 检查间隔(秒) [默认: 5]
+    #[arg(short, long, default_value_t = 5)]
+    interval: u64,
+
+    /// 无变化多久算卡住(秒) [默认: 60]
+    #[arg(short, long, default_value_t = 60)]
+    stuck_sec: u64,
+
+    /// 最大重试次数 [默认: 10]
+    #[arg(short, long, default_value_t = 10)]
+    max_retry: usize,
+}
+
 fn main() -> io::Result<()> {
     dotenv().ok();
-    let interval: u64 = var!("INTERVAL").parse().unwrap();
-    let stuck_sec: u64 = var!("STUCK_SEC").parse().unwrap();
-    let max_retry: usize = var!("MAX_RETRY").parse().unwrap();
+    let args = Args::parse();
 
     let mut last_active = Instant::now();
     let mut retry_count = 0usize;
 
-    println!("开始监控 Claude Code 在 tmux pane {} 中的状态", var!("PANE"));
-    println!("使用 LLM 后端: {}", var!("LLM_BACKEND"));
+    println!("开始监控 Claude Code 在 tmux pane {} 中的状态", args.pane);
+    println!("使用 LLM 后端: {}", args.backend);
 
     // 主监控循环
-    run_monitoring_loop(interval, stuck_sec, max_retry, &mut last_active, &mut retry_count)
+    run_monitoring_loop(&args, &mut last_active, &mut retry_count)
 }
 
 fn run_monitoring_loop(
-    interval: u64,
-    stuck_sec: u64,
-    max_retry: usize,
+    args: &Args,
     last_active: &mut Instant,
     retry_count: &mut usize,
 ) -> io::Result<()> {
     loop {
-        let text = capture();
+        let text = capture(&args.pane);
         
         // 检查 Claude Code 是否仍在活动
         if is_claude_active(&text) {
@@ -265,26 +282,26 @@ fn run_monitoring_loop(
             println!("🔄 Claude Code 正在工作中...");
         } else {
             // Claude Code 不活动，检查是否超时
-            if last_active.elapsed() >= Duration::from_secs(stuck_sec) {
-                println!("⏸️ Claude Code 停止工作超过 {} 秒，调用 LLM 判断状态...", stuck_sec);
+            if last_active.elapsed() >= Duration::from_secs(args.stuck_sec) {
+                println!("⏸️ Claude Code 停止工作超过 {} 秒，调用 LLM 判断状态...", args.stuck_sec);
                 
-                match ask_llm_final_status(&text) {
+                match ask_llm_final_status(&text, &args.backend) {
                     Ok(TaskStatus::Done) => {
                         println!("✅ LLM 确认任务已完成，进入完成状态监控...");
                         // 进入完成状态监控循环
-                        if monitor_completion_state().is_err() {
+                        if monitor_completion_state(&args.pane).is_err() {
                             println!("⚠️ 完成状态监控中断，重新开始正常监控");
                         }
                     }
                     Ok(TaskStatus::Stuck) => {
                         println!("⚠️ LLM 确认任务卡住");
-                        if *retry_count < max_retry {
-                            println!("重试 {}/{}", *retry_count + 1, max_retry);
-                            send_keys("Retry");
+                        if *retry_count < args.max_retry {
+                            println!("重试 {}/{}", *retry_count + 1, args.max_retry);
+                            send_keys("Retry", &args.pane);
                             *retry_count += 1;
                         } else {
                             println!("达到最大重试次数，发送 /compact");
-                            send_keys("/compact");
+                            send_keys("/compact", &args.pane);
                             *retry_count = 0;
                         }
                         // 重置状态，重新开始监控
@@ -293,30 +310,30 @@ fn run_monitoring_loop(
                     Err(e) => {
                         eprintln!("⚠️ 状态判断失败: {}，等待下次检查", e);
                         // 等待更长时间再重试
-                        thread::sleep(Duration::from_secs(stuck_sec));
+                        thread::sleep(Duration::from_secs(args.stuck_sec));
                     }
                 }
             } else {
-                let wait_time = stuck_sec - last_active.elapsed().as_secs();
+                let wait_time = args.stuck_sec - last_active.elapsed().as_secs();
                 println!("⏳ 等待 {} 秒后判断 Claude Code 状态...", wait_time);
             }
         }
         
-        thread::sleep(Duration::from_secs(interval));
+        thread::sleep(Duration::from_secs(args.interval));
     }
 }
 
 /// 原本实现：在 LLM 判断为 DONE 后立即退出程序
 /// 简化实现：持续监控完成状态，检测画面变化以决定是否重启监控
 /// 这是一个简化实现，将程序变为守护进程模式
-fn monitor_completion_state() -> Result<(), String> {
+fn monitor_completion_state(pane: &str) -> Result<(), String> {
     let mut last_hash = 0u64;
     let mut check_count = 0usize;
     
     println!("🔄 进入完成状态监控模式...");
     
     loop {
-        let text = capture();
+        let text = capture(pane);
         let hash = seahash::hash(text.as_bytes());
         
         if hash != last_hash {
