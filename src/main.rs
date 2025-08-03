@@ -127,7 +127,7 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
         "ollama" => {
             // 使用 tokio 运行时来执行异步函数
             let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
-            let model = "qwen3:7b-instruct-q4_K_M";
+            let model = "qwen2.5:3b";
             let url = var!("OLLAMA_URL");
             
             match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, model, &url)) {
@@ -144,8 +144,9 @@ fn ask_llm_final_status(text: &str) -> Result<TaskStatus, String> {
         }
         "openrouter" => {
             let url = "https://openrouter.ai/api/v1/chat/completions";
+            let model = var!("OPENROUTER_MODEL");
             let body = json!({
-                "model": var!("OPENROUTER_MODEL"),
+                "model": if model.is_empty() { "qwen/qwen-2.5-7b-instruct" } else { model.as_str() },
                 "messages": [
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": text}

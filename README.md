@@ -100,9 +100,10 @@ LLM_BACKEND=none
 | `STUCK_SEC` | `60` | 无活动多久算卡住（秒） |
 | `MAX_RETRY` | `10` | 最大重试次数 |
 | `LLM_BACKEND` | `ollama` | LLM 后端：`ollama`、`openrouter`、`none` |
-| `OLLAMA_MODEL` | `qwen3:7b-instruct-q4_K_M` | Ollama 模型名称 |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama 服务器地址 |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Ollama 模型名称 |
 | `OPENROUTER_KEY` | - | OpenRouter API 密钥 |
-| `OPENROUTER_MODEL` | `qwen/qwen3-7b-instruct` | OpenRouter 模型 |
+| `OPENROUTER_MODEL` | `qwen/qwen-2.5-7b-instruct` | OpenRouter 模型 |
 
 ## Ollama 支持说明
 
@@ -115,7 +116,7 @@ LLM_BACKEND=none
 
 要使用 Ollama 后端：
 1. 安装并启动 [Ollama](https://ollama.com/)
-2. 拉取所需模型：`ollama pull qwen3:7b-instruct-q4_K_M`
+2. 拉取所需模型：`ollama pull qwen2.5:3b`
 3. 设置环境变量：`LLM_BACKEND=ollama`
 
 ## OpenRouter 支持说明
