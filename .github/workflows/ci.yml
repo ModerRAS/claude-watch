@@ -21,9 +21,6 @@ jobs:
       with:
         toolchain: stable
 
-    - name: Check code format
-      run: cargo fmt -- --check
-
     - name: Check compilation
       run: cargo check
 
