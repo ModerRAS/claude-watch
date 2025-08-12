@@ -1,6 +1,6 @@
 use crate::config::{Config, OpenAiConfig, OpenRouterConfig};
 use serde_json::{json, Value};
-use tokio;
+// tokio imported implicitly through async functions
 
 /// 任务状态枚举
 #[derive(Debug, PartialEq)]
