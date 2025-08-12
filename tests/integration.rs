@@ -207,8 +207,8 @@ fn test_monitoring_decision_matrix() {
         ),
         (
             "Tool use: Reading file",
-            true, true, true,
-            "工具调用（检测为活动状态）"
+            true, false, true,
+            "工具调用（活动检测中识别，但不跳过LLM调用）"
         ),
         (
             "Compiling project\n* Building… (343s · ↑ 14.2k tokens)",
