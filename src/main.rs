@@ -48,5 +48,7 @@ fn main() -> io::Result<()> {
     println!("使用 LLM 后端: {}", config.llm.backend);
 
     // 主监控循环
-    run_monitoring_loop(&config, &mut last_active, &mut retry_count)
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        run_monitoring_loop(&config, &mut last_active, &mut retry_count).await
+    })
 }

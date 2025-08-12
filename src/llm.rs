@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, OpenAiConfig, OpenRouterConfig};
 use serde_json::{json, Value};
 use tokio;
 
@@ -236,6 +236,17 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
     let last_few_lines: Vec<&str> = lines.iter().rev().take(5).cloned().collect();
     let last_content = last_few_lines.join("\n");
     
+    // 特别检查Queue相关状态 - 这些是正常工作状态，不应该被判为卡住
+    if last_content.contains("Queue") || 
+       last_content.contains("queue") || 
+       last_content.contains("Queued") ||
+       last_content.contains("queued") ||
+       last_content.contains("Processing queue") {
+        // Queue处理是正常工作状态，不应该触发卡住判断
+        // 返回Stuck但不会真的触发重试，因为监控系统会继续检测
+        return TaskStatus::Stuck;
+    }
+    
     // 如果最后几行看起来像是程序输出的一部分，可能是正常的处理状态
     if last_content.contains('$') || last_content.contains('>') || last_content.contains('#') {
         // 如果有命令提示符，可能是在等待输入，不算卡住
@@ -251,6 +262,128 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
     // 默认认为卡住（因为画面已经停止变化了）
     // 但这个逻辑现在更加谨慎，只有在确认没有其他状态时才判断为卡住
     TaskStatus::Stuck
+}
+
+/// 使用 LLM 生成激活消息
+/// 
+/// 这是智能激活功能，让LLM生成一句话来激活卡住的Claude Code
+pub async fn ask_llm_for_activation(prompt: &str, backend: &str, config: &Config) -> Result<String, String> {
+    match backend {
+        "openai" => {
+            if let Some(openai_config) = &config.llm.openai {
+                ask_openai_for_activation(prompt, openai_config).await
+            } else {
+                Err("OpenAI配置未找到".to_string())
+            }
+        },
+        "openrouter" => {
+            if let Some(openrouter_config) = &config.llm.openrouter {
+                ask_openrouter_for_activation(prompt, openrouter_config).await
+            } else {
+                Err("OpenRouter配置未找到".to_string())
+            }
+        },
+        "ollama" => {
+            if let Some(ollama_config) = &config.llm.ollama {
+                ask_ollama_with_ollama_rs(prompt, &ollama_config.model, &ollama_config.url).await
+            } else {
+                Err("Ollama配置未找到".to_string())
+            }
+        },
+        _ => {
+            Err(format!("不支持的LLM后端: {}", backend))
+        }
+    }
+}
+
+/// 使用OpenAI生成激活消息
+async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    
+    let request_body = serde_json::json!({
+        "model": &config.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个Claude Code激活助手。当Claude Code卡住时，你需要生成一句简短、有效的话来激活它。"
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
+        "max_tokens": 50,
+        "temperature": 0.1
+    });
+    
+    let response = client
+        .post(&config.api_base)
+        .header("Authorization", format!("Bearer {}", &config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await;
+    
+    match response {
+        Ok(resp) => {
+            if let Ok(text) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                        return Ok(content.trim().to_string());
+                    }
+                }
+            }
+            Err("OpenAI响应解析失败".to_string())
+        },
+        Err(e) => {
+            Err(format!("OpenAI请求失败: {}", e))
+        }
+    }
+}
+
+/// 使用OpenRouter生成激活消息
+async fn ask_openrouter_for_activation(prompt: &str, config: &OpenRouterConfig) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    
+    let request_body = serde_json::json!({
+        "model": &config.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是一个Claude Code激活助手。当Claude Code卡住时，你需要生成一句简短、有效的话来激活它。"
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
+        "max_tokens": 50,
+        "temperature": 0.1
+    });
+    
+    let response = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", &config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await;
+    
+    match response {
+        Ok(resp) => {
+            if let Ok(text) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                        return Ok(content.trim().to_string());
+                    }
+                }
+            }
+            Err("OpenRouter响应解析失败".to_string())
+        },
+        Err(e) => {
+            Err(format!("OpenRouter请求失败: {}", e))
+        }
+    }
 }
 
 /// 使用 LLM 判断 Claude Code 最终状态
