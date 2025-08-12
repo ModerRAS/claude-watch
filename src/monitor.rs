@@ -69,12 +69,33 @@ pub async fn run_monitoring_loop(
     loop {
         let text = capture(&config.tmux.pane);
         
+        // 新增：基于内容变化的活动检测 - 这是最可靠的方法
+        let has_content_changed = unsafe {
+            static mut LAST_CONTENT: String = String::new();
+            if LAST_CONTENT.is_empty() {
+                // 第一次运行，有内容就认为有变化
+                LAST_CONTENT.clone_from(&text);
+                true
+            } else {
+                // 比较当前内容和上一次内容是否不同
+                let changed = text.trim() != LAST_CONTENT.trim();
+                if changed {
+                    LAST_CONTENT.clone_from(&text);
+                }
+                changed
+            }
+        };
+        
         // 检查 Claude Code 是否仍在活动
-        if is_claude_active(&text) {
-            // Claude Code 仍在活动
+        if is_claude_active(&text) || has_content_changed {
+            // Claude Code 仍在活动或有实质性进展
             *last_active = Instant::now();
             *retry_count = 0;
-            println!("🔄 Claude Code 正在工作中...");
+            if has_content_changed {
+                println!("🔄 检测到内容变化，Claude Code 正在工作中...");
+            } else {
+                println!("🔄 Claude Code 正在工作中...");
+            }
         } else {
             // Claude Code 不活动，检查是否超时
             if last_active.elapsed() >= Duration::from_secs(config.monitoring.stuck_sec) {
