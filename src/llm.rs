@@ -63,7 +63,7 @@ async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str, url: &str) ->
 }
 
 /// 使用 openai-api-rs 库调用 OpenAI 兼容的 API
-async fn ask_openai(prompt_text: &str, config: &crate::config::OpenAiConfig) -> Result<String, String> {
+async fn ask_openai(system_prompt: &str, user_content: &str, config: &crate::config::OpenAiConfig) -> Result<String, String> {
     use openai_api_rs::v1::api::OpenAIClient;
     use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
     
@@ -85,14 +85,14 @@ async fn ask_openai(prompt_text: &str, config: &crate::config::OpenAiConfig) -> 
         vec![
             chat_completion::ChatCompletionMessage {
                 role: chat_completion::MessageRole::system,
-                content: chat_completion::Content::Text(include_str!("../prompt_final.md").to_string()),
+                content: chat_completion::Content::Text(system_prompt.to_string()),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
             },
             chat_completion::ChatCompletionMessage {
                 role: chat_completion::MessageRole::user,
-                content: chat_completion::Content::Text(prompt_text.to_string()),
+                content: chat_completion::Content::Text(user_content.to_string()),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -178,8 +178,8 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
         return Ok(simple_heuristic_check(text));
     }
     
-    let prompt = include_str!("../prompt_final.md");
-    let full_prompt = format!("{}\n\n{}", prompt, text);
+    // 只读取一次 system prompt
+    let system_prompt = include_str!("../prompt_final.md");
 
     match backend.as_ref() {
         "ollama" => {
@@ -188,7 +188,10 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
             let model = config.llm.ollama.as_ref().map(|o| o.model.clone()).unwrap_or("qwen2.5:3b".to_string());
             let url = config.llm.ollama.as_ref().map(|o| o.url.clone()).unwrap_or("http://localhost:11434".to_string());
             
-            match rt.block_on(ask_ollama_with_ollama_rs(&full_prompt, &model, &url)) {
+            // 对于 Ollama，我们需要将 system 和 user 内容以合适的格式传递
+            let ollama_prompt = format!("### 系统指令\n{}\n\n### 用户内容\n{}", system_prompt, text);
+            
+            match rt.block_on(ask_ollama_with_ollama_rs(&ollama_prompt, &model, &url)) {
                 Ok(response) => {
                     let response = response.trim();
                     match response {
@@ -205,7 +208,7 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
             let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
             
             if let Some(openai_config) = &config.llm.openai {
-                match rt.block_on(ask_openai(&full_prompt, &openai_config)) {
+                match rt.block_on(ask_openai(&system_prompt, &text, &openai_config)) {
                     Ok(response) => {
                         let response = response.trim();
                         match response {
@@ -225,7 +228,6 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
             let model = config.llm.openrouter.as_ref().map(|o| o.model.clone()).unwrap_or("qwen/qwen-2.5-7b-instruct".to_string());
             
             if let Some(openrouter_config) = &config.llm.openrouter {
-                let system_prompt = include_str!("../prompt_final.md");
                 let body = json!({
                     "model": model,
                     "messages": [
