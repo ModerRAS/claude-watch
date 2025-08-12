@@ -85,7 +85,7 @@ async fn ask_openai(prompt_text: &str, config: &crate::config::OpenAiConfig) -> 
         vec![
             chat_completion::ChatCompletionMessage {
                 role: chat_completion::MessageRole::system,
-                content: chat_completion::Content::Text("你是 Claude Code 状态判别器。用户会粘贴一段 tmux pane 文本。\n\n1. 忽略所有以 `─`, `│`, `╭`, `╰`, `?`, `>`, `ctrl+r`, `… +N lines` 等边框/提示符开头的行。\n2. 找到 Claude 主动输出的最后一句话（通常是 ● 开头或普通文本）。\n3. 判断这句话：\n   - 如果它表示\"完成\"\"成功\"\"已推送\"\"下一步可继续\" → DONE  \n   - 如果它是未完结的预告（如\"让我…\"\"接下来我将…\"\"正在…\"）→ STUCK  \n\n只返回 DONE 或 STUCK。".to_string()),
+                content: chat_completion::Content::Text(include_str!("../prompt_final.md").to_string()),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -225,10 +225,11 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
             let model = config.llm.openrouter.as_ref().map(|o| o.model.clone()).unwrap_or("qwen/qwen-2.5-7b-instruct".to_string());
             
             if let Some(openrouter_config) = &config.llm.openrouter {
+                let system_prompt = include_str!("../prompt_final.md");
                 let body = json!({
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": prompt},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": text}
                     ],
                     "max_tokens": 4,
