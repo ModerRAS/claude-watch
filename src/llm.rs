@@ -292,6 +292,13 @@ pub async fn ask_llm_for_activation(prompt: &str, backend: &str, config: &Config
 async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Result<String, String> {
     let client = reqwest::Client::new();
     
+    // 构建正确的URL - 添加 chat/completions 路径
+    let url = if config.api_base.ends_with('/') {
+        format!("{}chat/completions", config.api_base)
+    } else {
+        format!("{}/chat/completions", config.api_base)
+    };
+    
     let request_body = serde_json::json!({
         "model": &config.model,
         "messages": [
@@ -308,8 +315,11 @@ async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Resul
         "temperature": 0.1
     });
     
+    println!("🔍 OpenAI请求URL: {}", url);
+    println!("🔍 OpenAI请求体: {}", request_body);
+    
     let response = client
-        .post(&config.api_base)
+        .post(&url)
         .header("Authorization", format!("Bearer {}", &config.api_key))
         .header("Content-Type", "application/json")
         .json(&request_body)
@@ -319,13 +329,25 @@ async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Resul
     match response {
         Ok(resp) => {
             if let Ok(text) = resp.text().await {
+                // 调试：打印原始响应
+                println!("🔍 OpenAI原始响应: {}", text);
+                
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    println!("🔍 OpenAI JSON解析成功: {:?}", json);
+                    
                     if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
                         return Ok(content.trim().to_string());
+                    } else {
+                        println!("🔍 OpenAI JSON中找不到content字段");
+                        return Err("OpenAI响应中缺少content字段".to_string());
                     }
+                } else {
+                    println!("🔍 OpenAI JSON解析失败，原始文本: {}", text);
+                    return Err(format!("OpenAI JSON解析失败，原始响应: {}", text));
                 }
+            } else {
+                return Err("OpenAI响应读取失败".to_string());
             }
-            Err("OpenAI响应解析失败".to_string())
         },
         Err(e) => {
             Err(format!("OpenAI请求失败: {}", e))
