@@ -307,18 +307,14 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         
         // 检查是否有明确的活动状态关键词
         let active_keywords = [
-            // 深度思考状态
+            // 核心深度思考状态（这些是Claude Code特有的，最可靠）
             "Cogitating", "Herding", "Meandering", "Reticulating", "Thinking",
-            // 处理状态
-            "Processing", "Compiling", "Building", "Executing", "Running",
-            // 文件操作
+            // 核心处理状态
+            "Processing", "Compiling", "Building", "Executing",
+            // 核心文件操作
             "Reading", "Writing", "Generating", "Creating", "Analyzing",
-            // 工具调用
-            "Calling", "Searching", "Browsing", "Loading", "Saving",
-            // 网络请求
-            "Fetching", "Downloading", "Uploading", "Connecting",
-            // 其他活动状态
-            "Calculating", "Transforming", "Converting", "Parsing"
+            // 核心工具调用
+            "Calling", "Searching", "Browsing", "Loading", "Saving"
         ];
         
         for keyword in &active_keywords {
@@ -340,12 +336,12 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     if last_content.ends_with("...") || 
        last_content.ends_with("▪") || 
        last_content.ends_with("◦") ||
-       last_content.ends_with("•") ||
-       last_content.ends_with(">") ||
-       last_content.ends_with("$") ||
-       last_content.ends_with("#") {
+       last_content.ends_with("•") {
         return true;
     }
+    
+    // 注意：不能检查>、$、#作为未完成输出，因为命令提示符状态也包含这些字符
+    // 命令提示符状态应该是空闲状态，不应该被认为是未完成输出
     
     // 检查是否有时间计数器（如 "104s"）但没有其他活动指示
     // 这种情况可能是在等待外部操作完成
