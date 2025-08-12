@@ -315,8 +315,7 @@ async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Resul
         "temperature": 0.1
     });
     
-    println!("🔍 OpenAI请求URL: {}", url);
-    println!("🔍 OpenAI请求体: {}", request_body);
+    // 静默构建请求，调试信息已确认功能正常
     
     let response = client
         .post(&url)
@@ -329,21 +328,14 @@ async fn ask_openai_for_activation(prompt: &str, config: &OpenAiConfig) -> Resul
     match response {
         Ok(resp) => {
             if let Ok(text) = resp.text().await {
-                // 调试：打印原始响应
-                println!("🔍 OpenAI原始响应: {}", text);
-                
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                    println!("🔍 OpenAI JSON解析成功: {:?}", json);
-                    
                     if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
                         return Ok(content.trim().to_string());
                     } else {
-                        println!("🔍 OpenAI JSON中找不到content字段");
                         return Err("OpenAI响应中缺少content字段".to_string());
                     }
                 } else {
-                    println!("🔍 OpenAI JSON解析失败，原始文本: {}", text);
-                    return Err(format!("OpenAI JSON解析失败，原始响应: {}", text));
+                    return Err("OpenAI响应解析失败".to_string());
                 }
             } else {
                 return Err("OpenAI响应读取失败".to_string());
