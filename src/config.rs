@@ -97,7 +97,7 @@ impl Config {
     }
     
     /// Create configuration from command line arguments
-    pub fn from_args(args: &crate::Args) -> Self {
+    pub fn from_args(args: &crate::args::Args) -> Self {
         let backend = args.backend.clone().unwrap_or("ollama".to_string());
         
         Config {

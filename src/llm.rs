@@ -236,16 +236,8 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
     let last_few_lines: Vec<&str> = lines.iter().rev().take(5).cloned().collect();
     let last_content = last_few_lines.join("\n");
     
-    // 特别检查Queue相关状态 - 这些是正常工作状态，不应该被判为卡住
-    if last_content.contains("Queue") || 
-       last_content.contains("queue") || 
-       last_content.contains("Queued") ||
-       last_content.contains("queued") ||
-       last_content.contains("Processing queue") {
-        // Queue处理是正常工作状态，不应该触发卡住判断
-        // 返回Stuck但不会真的触发重试，因为监控系统会继续检测
-        return TaskStatus::Stuck;
-    }
+    // 这个逻辑移到了monitor.rs中的check_if_should_skip_llm_call函数中
+    // 这里只处理启发式检查，不跳过LLM调用判断
     
     // 如果最后几行看起来像是程序输出的一部分，可能是正常的处理状态
     if last_content.contains('$') || last_content.contains('>') || last_content.contains('#') {

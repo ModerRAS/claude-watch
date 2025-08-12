@@ -3,9 +3,56 @@ use crate::activity::is_claude_active;
 use crate::llm::ask_llm_final_status;
 use crate::llm::TaskStatus;
 use crate::tmux::{capture, send_keys};
+use std::collections::HashMap;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::io;
+
+/// 全局状态，用于追踪时间变化
+static mut TIME_TRACKER: Option<HashMap<String, u64>> = None;
+
+/// 提取Claude Code执行条中的时间值
+fn extract_execution_time(text: &str) -> Option<u64> {
+    // 匹配格式：(数字s)
+    let time_pattern = regex::Regex::new(r"\((\d+)s\)").unwrap();
+    if let Some(caps) = time_pattern.captures(text) {
+        if let Some(time_str) = caps.get(1) {
+            return time_str.as_str().parse::<u64>().ok();
+        }
+    }
+    None
+}
+
+/// 检查时间是否在递增（表明Claude Code在工作）
+fn is_time_increasing(current_text: &str, pane: &str) -> bool {
+    unsafe {
+        if TIME_TRACKER.is_none() {
+            TIME_TRACKER = Some(HashMap::new());
+        }
+        
+        if let Some(ref mut tracker) = TIME_TRACKER {
+            let current_time = extract_execution_time(current_text);
+            
+            if let Some(current) = current_time {
+                let key = pane.to_string();
+                
+                if let Some(&previous_time) = tracker.get(&key) {
+                    // 如果时间比上次大，说明在递增
+                    if current > previous_time {
+                        tracker.insert(key, current);
+                        return true;
+                    }
+                } else {
+                    // 第一次记录时间
+                    tracker.insert(key, current);
+                    return true; // 第一次看到时间，认为是活动的
+                }
+            }
+        }
+    }
+    
+    false
+}
 
 /// 运行主监控循环
 /// 
@@ -33,7 +80,15 @@ pub async fn run_monitoring_loop(
             if last_active.elapsed() >= Duration::from_secs(config.monitoring.stuck_sec) {
                 println!("⏸️ Claude Code 停止工作超过 {} 秒，调用 LLM 判断状态...", config.monitoring.stuck_sec);
                 
-                // 在调用 LLM 之前，先进行额外的检查以避免误判
+                // 关键改进：检查时间是否在递增，这是最可靠的活动指示
+                if is_time_increasing(&text, &config.tmux.pane) {
+                    println!("🔄 检测到时间在递增，Claude Code 正在工作中，跳过 LLM 调用...");
+                    *last_active = Instant::now();
+                    thread::sleep(Duration::from_secs(config.monitoring.interval));
+                    continue;
+                }
+                
+                // 如果时间没有递增，再进行其他检查
                 let should_skip_llm = check_if_should_skip_llm_call(&text);
                 
                 if should_skip_llm {
@@ -200,79 +255,22 @@ fn monitor_completion_state(pane: &str) -> Result<(), String> {
 /// 2. 长时间处理的工具调用
 /// 3. 网络请求或文件操作
 /// 4. 编译或构建过程
-fn check_if_should_skip_llm_call(text: &str) -> bool {
+pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
     let last_lines: Vec<&str> = lines.iter().rev().take(10).cloned().collect();
     let last_content = last_lines.join("\n");
     
-    // 检查深度思考状态
-    let thinking_patterns = [
-        "Cogitating",
-        "Thinking",
-        "深度思考",
-        "思考中",
-        "分析中",
-        "处理中",
-    ];
-    
-    for pattern in &thinking_patterns {
-        if last_content.contains(pattern) {
-            return true;
-        }
+    // 使用正则表达式检查Claude Code的标准执行条格式
+    // 格式：*(状态)… (时间 · tokens · esc to interrupt)
+    let execution_bar_pattern = regex::Regex::new(r"\*[^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
+    if execution_bar_pattern.is_match(&last_content) {
+        return true;
     }
     
-    // 检查长时间处理的操作
-    let long_operations = [
-        "Compiling",
-        "Building",
-        "Installing",
-        "Downloading",
-        "Uploading",
-        "Generating",
-        "Creating",
-        "Writing",
-        "Reading",
-        "Processing",
-    ];
-    
-    for pattern in &long_operations {
-        if last_content.contains(pattern) {
-            return true;
-        }
-    }
-    
-    // 检查工具调用状态
-    let tool_patterns = [
-        "Tool use",
-        "Calling tool",
-        "Function call",
-        "API call",
-        "HTTP request",
-        "Requesting",
-        "Fetching",
-    ];
-    
-    for pattern in &tool_patterns {
-        if last_content.contains(pattern) {
-            return true;
-        }
-    }
-    
-    // 检查进度指示器
-    let progress_indicators = [
-        "...",
-        "▪▪▪",
-        "◦◦◦",
-        "●●●",
-        ">>>",
-        "***",
-        "---",
-    ];
-    
-    for pattern in &progress_indicators {
-        if last_content.contains(pattern) {
-            return true;
-        }
+    // 作为备选，检查更宽松的模式：包含时间和tokens的括号内容
+    let time_tokens_pattern = regex::Regex::new(r"\([^)]*\d+s[^)]*tokens[^)]*\)").unwrap();
+    if time_tokens_pattern.is_match(&last_content) {
+        return true;
     }
     
     // 检查是否有未完成的输出
@@ -368,7 +366,7 @@ async fn attempt_llm_activation(config: &Config, pane: &str) -> Result<bool, Str
 /// 
 /// 这个函数用来区分真正的活动恢复和虚假的时间计数器变化
 /// 核心原则：只有当有新的实质性内容时，才认为是真正的进展
-fn has_substantial_progress(text: &str) -> bool {
+pub fn has_substantial_progress(text: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
     let recent_lines: Vec<&str> = lines.iter().rev().take(5).cloned().collect();
     let recent_content = recent_lines.join("\n");
@@ -441,7 +439,7 @@ fn has_substantial_progress(text: &str) -> bool {
 }
 
 /// 检查是否只是时间计数器，没有实质性内容
-fn is_just_time_counter(text: &str) -> bool {
+pub fn is_just_time_counter(text: &str) -> bool {
     let trimmed = text.trim();
     
     // 检查是否主要是时间计数器格式
