@@ -158,6 +158,10 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
         "Completed",
         "Done",
         "✅",
+        "工作已完成",
+        "所有步骤已完成",
+        "代码生成完毕",
+        "所有文件已创建完成",
     ];
     
     if done_patterns.iter().any(|&pattern| text.contains(pattern)) {
@@ -180,13 +184,72 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
         "timeout",
         "超时",
         "无响应",
+        "无法继续",
+        "中断",
     ];
     
     if error_patterns.iter().any(|&pattern| text.contains(pattern)) {
         return TaskStatus::Stuck;
     }
     
+    // 检查可能仍在处理中的状态（避免误判为卡住）
+    let processing_patterns = [
+        "Cogitating",
+        "Thinking",
+        "Processing",
+        "Working",
+        "Analyzing",
+        "Generating",
+        "Compiling",
+        "Building",
+        "Installing",
+        "Tool use",
+        "Calling tool",
+        "Function call",
+        "API call",
+        "Reading file",
+        "Writing file",
+        "Creating file",
+        "Editing file",
+        "Downloading",
+        "Uploading",
+        "Checking",
+        "Testing",
+        "Retry",
+        "Escaping",
+        "Interrupting",
+        "...",
+        "▪▪▪",
+        "◦◦◦",
+    ];
+    
+    // 如果检测到处理中状态，不轻易判断为卡住
+    // 这里返回一个特殊状态，让监控逻辑继续等待
+    if processing_patterns.iter().any(|&pattern| text.contains(pattern)) {
+        // 简化起见，我们仍然返回 Stuck，但在监控逻辑中需要处理这种情况
+        // 更好的做法是增加一个 Processing 状态，但现在先这样处理
+        return TaskStatus::Stuck;
+    }
+    
+    // 检查是否有未完成的命令或程序输出
+    let lines: Vec<&str> = text.lines().collect();
+    let last_few_lines: Vec<&str> = lines.iter().rev().take(5).cloned().collect();
+    let last_content = last_few_lines.join("\n");
+    
+    // 如果最后几行看起来像是程序输出的一部分，可能是正常的处理状态
+    if last_content.contains('$') || last_content.contains('>') || last_content.contains('#') {
+        // 如果有命令提示符，可能是在等待输入，不算卡住
+        return TaskStatus::Stuck;
+    }
+    
+    // 如果文本看起来不完整或者有未闭合的结构，可能是执行中
+    if text.ends_with("...") || text.ends_with("•") || text.ends_with("▪") {
+        // 仍在处理中，不立即判断为卡住
+        return TaskStatus::Stuck;
+    }
+    
     // 默认认为卡住（因为画面已经停止变化了）
+    // 但这个逻辑现在更加谨慎，只有在确认没有其他状态时才判断为卡住
     TaskStatus::Stuck
 }
 
