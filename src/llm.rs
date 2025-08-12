@@ -62,59 +62,85 @@ async fn ask_ollama_with_ollama_rs(prompt_text: &str, model: &str, url: &str) ->
     }
 }
 
-/// 使用 openai-api-rs 库调用 OpenAI 兼容的 API
+/// 手搓 HTTP 请求调用 OpenAI 兼容的 API
 async fn ask_openai(system_prompt: &str, user_content: &str, config: &crate::config::OpenAiConfig) -> Result<String, String> {
-    use openai_api_rs::v1::api::OpenAIClient;
-    use openai_api_rs::v1::chat_completion::{self, ChatCompletionRequest};
+    use serde_json::{json, Value};
     
     // 检查 API key 是否为空
     if config.api_key.is_empty() {
         return Err("OpenAI API key 未设置".to_string());
     }
     
-    // 创建 OpenAI 客户端
-    let mut client = OpenAIClient::builder()
-        .with_endpoint(&config.api_base)
-        .with_api_key(config.api_key.clone())
-        .build()
-        .map_err(|e| format!("创建 OpenAI 客户端失败: {}", e))?;
-    
-    // 创建聊天完成请求
-    let request = ChatCompletionRequest::new(
-        config.model.clone(),
-        vec![
-            chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::system,
-                content: chat_completion::Content::Text(system_prompt.to_string()),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
+    // 创建请求体
+    let request_body = json!({
+        "model": config.model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
             },
-            chat_completion::ChatCompletionMessage {
-                role: chat_completion::MessageRole::user,
-                content: chat_completion::Content::Text(user_content.to_string()),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
+            {
+                "role": "user",
+                "content": user_content
             }
         ],
-    ).max_tokens(4).temperature(0.0);
+        "max_tokens": 4,
+        "temperature": 0.0
+    });
     
-    // 发送请求
-    match client.chat_completion(request).await {
-        Ok(result) => {
-            if let Some(choice) = result.choices.first() {
-                if let Some(content) = &choice.message.content {
-                    Ok(content.to_string())
-                } else {
-                    Err("返回内容为空".to_string())
+    // 构建完整的 URL
+    let url = if config.api_base.ends_with('/') {
+        format!("{}chat/completions", config.api_base)
+    } else {
+        format!("{}/chat/completions", config.api_base)
+    };
+    
+    // 发送 HTTP 请求
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+    
+    // 检查响应状态
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_else(|_| "无法获取错误信息".to_string());
+        return Err(format!("API 请求失败，状态码: {}, 错误: {}", status, error_text));
+    }
+    
+    // 解析响应 JSON
+    let response_text = response
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+    
+    let json_response: Value = serde_json::from_str(&response_text)
+        .map_err(|e| format!("解析 JSON 失败: {}, 响应: {}", e, response_text))?;
+    
+    // 提取结果
+    if let Some(choices) = json_response.get("choices").and_then(|v| v.as_array()) {
+        if let Some(first_choice) = choices.first() {
+            if let Some(message) = first_choice.get("message").and_then(|v| v.as_object()) {
+                // 只从 content 字段判断，忽略推理过程
+                if let Some(content) = message.get("content").and_then(|v| v.as_str()) {
+                    if !content.is_empty() {
+                        return Ok(content.to_string());
+                    }
                 }
-            } else {
-                Err("没有返回结果".to_string())
+                
+                // 如果 content 为空，忽略推理过程，直接返回 STUCK
+                // 因为画面已经停止变化，默认认为卡住
+                return Ok("STUCK".to_string());
             }
         }
-        Err(e) => Err(format!("OpenAI 调用失败: {}", e)),
     }
+    
+    Err("无法解析 API 响应".to_string())
 }
 
 /// 简化的启发式检查（仅在 LLM 不可用时使用）
