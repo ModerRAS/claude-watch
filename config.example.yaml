@@ -1,0 +1,39 @@
+# Claude Watch Configuration File
+# This file contains all configuration options for claude-watch
+
+# LLM Backend Configuration
+llm:
+  # Backend type: ollama, openai, openrouter, none
+  backend: "ollama"
+  
+  # Ollama configuration (used when backend is "ollama")
+  ollama:
+    url: "http://localhost:11434"
+    model: "qwen2.5:3b"
+  
+  # OpenAI configuration (used when backend is "openai")
+  openai:
+    api_key: "sk-..."  # Your OpenAI API key
+    api_base: "https://api.openai.com/v1"  # OpenAI API base URL
+    model: "gpt-4o"
+  
+  # OpenRouter configuration (used when backend is "openrouter")
+  openrouter:
+    api_key: "sk-or-..."  # Your OpenRouter API key
+    model: "qwen/qwen-2.5-7b-instruct"
+
+# Monitoring Configuration
+monitoring:
+  # Check interval in seconds
+  interval: 5
+  
+  # Stuck timeout in seconds
+  stuck_sec: 60
+  
+  # Maximum retry attempts
+  max_retry: 10
+
+# Tmux Configuration
+tmux:
+  # Tmux pane ID (e.g., %0 or mysess:1.0)
+  pane: "%0"
