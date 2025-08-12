@@ -12,8 +12,8 @@ use std::io;
 static mut TIME_TRACKER: Option<HashMap<String, u64>> = None;
 
 /// 提取Claude Code执行条中的时间值
-fn extract_execution_time(text: &str) -> Option<u64> {
-    // 匹配格式：(数字s)
+pub fn extract_execution_time(text: &str) -> Option<u64> {
+    // 匹配格式：(数字s) - 更宽松的模式，能从复杂格式中提取
     let time_pattern = regex::Regex::new(r"\((\d+)s\)").unwrap();
     if let Some(caps) = time_pattern.captures(text) {
         if let Some(time_str) = caps.get(1) {
@@ -24,7 +24,7 @@ fn extract_execution_time(text: &str) -> Option<u64> {
 }
 
 /// 检查时间是否在递增（表明Claude Code在工作）
-fn is_time_increasing(current_text: &str, pane: &str) -> bool {
+pub fn is_time_increasing(current_text: &str, pane: &str) -> bool {
     unsafe {
         if TIME_TRACKER.is_none() {
             TIME_TRACKER = Some(HashMap::new());
