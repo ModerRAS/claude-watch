@@ -307,8 +307,18 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         
         // 检查是否有明确的活动状态关键词
         let active_keywords = [
-            "Cogitating", "Herding", "Processing", "Compiling", "Building",
-            "Reading", "Writing", "Generating", "Analyzing", "Creating"
+            // 深度思考状态
+            "Cogitating", "Herding", "Meandering", "Reticulating", "Thinking",
+            // 处理状态
+            "Processing", "Compiling", "Building", "Executing", "Running",
+            // 文件操作
+            "Reading", "Writing", "Generating", "Creating", "Analyzing",
+            // 工具调用
+            "Calling", "Searching", "Browsing", "Loading", "Saving",
+            // 网络请求
+            "Fetching", "Downloading", "Uploading", "Connecting",
+            // 其他活动状态
+            "Calculating", "Transforming", "Converting", "Parsing"
         ];
         
         for keyword in &active_keywords {
