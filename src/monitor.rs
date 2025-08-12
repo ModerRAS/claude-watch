@@ -33,34 +33,24 @@ pub fn is_time_increasing(current_text: &str, pane: &str) -> bool {
         if let Some(ref mut tracker) = TIME_TRACKER {
             let current_time = extract_execution_time(current_text);
             
-            println!("🔍 时间递增调试: pane={}, 当前时间={:?}", pane, current_time);
-            
             if let Some(current) = current_time {
                 let key = pane.to_string();
                 
                 if let Some(&previous_time) = tracker.get(&key) {
-                    println!("🔍 时间递增调试: 之前时间={}, 当前时间={}, 比较: {} > {}", previous_time, current, current, previous_time);
                     // 如果时间比上次大，说明在递增
                     if current > previous_time {
                         tracker.insert(key, current);
-                        println!("🔍 时间递增调试: 时间在递增，返回true");
                         return true;
-                    } else {
-                        println!("🔍 时间递增调试: 时间没有递增，返回false");
                     }
                 } else {
                     // 第一次记录时间
                     tracker.insert(key, current);
-                    println!("🔍 时间递增调试: 第一次看到时间，返回true");
                     return true; // 第一次看到时间，认为是活动的
                 }
-            } else {
-                println!("🔍 时间递增调试: 未提取到时间，返回false");
             }
         }
     }
     
-    println!("🔍 时间递增调试: TIME_TRACKER为None，返回false");
     false
 }
 
@@ -109,7 +99,7 @@ pub async fn run_monitoring_loop(
                     continue;
                 }
                 
-                match ask_llm_final_status(&text, &config.llm.backend, config) {
+                match ask_llm_final_status(&text, &config.llm.backend, config).await {
                     Ok(TaskStatus::Done) => {
                         println!("✅ LLM 确认任务已完成，进入完成状态监控...");
                         // 进入完成状态监控循环
@@ -266,24 +256,22 @@ fn monitor_completion_state(pane: &str) -> Result<(), String> {
 /// 3. 网络请求或文件操作
 /// 4. 编译或构建过程
 pub fn check_if_should_skip_llm_call(text: &str) -> bool {
-    println!("🔍 调试: check_if_should_skip_llm_call 被调用");
     let lines: Vec<&str> = text.lines().collect();
     let last_lines: Vec<&str> = lines.iter().rev().take(10).cloned().collect();
     let last_content = last_lines.join("\n");
-    println!("🔍 调试: 处理内容: {}", last_content.chars().take(100).collect::<String>());
     
     // 首先检查明确的中断状态 - 这些状态不应该跳过LLM调用
     if last_content.contains("Interrupted by user") ||
        last_content.contains("Aborted by user") ||
        last_content.contains("Cancelled by user") ||
        last_content.contains("Interrupted") {
-        println!("🔍 调试: 检测到中断状态，不跳过LLM调用");
         return false; // 明确中断状态，不跳过LLM调用
     }
     
     // 检查是否在命令提示符状态 - Claude Code在命令提示符状态时是空闲的
     // 只有命令提示符且没有其他活动内容时，不应该跳过LLM调用
     let trimmed_content = last_content.trim();
+    
     if trimmed_content.ends_with('>') || 
        trimmed_content.ends_with('$') || 
        trimmed_content.ends_with('#') {
@@ -296,20 +284,17 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         
         // 如果只有命令提示符行，或者主要内容就是命令提示符，则是空闲状态
         if non_empty_lines.len() <= 2 {
-            println!("🔍 调试: 检测到纯命令提示符状态，不跳过LLM调用");
             return false; // 纯命令提示符状态，不跳过LLM调用
         } else {
-            // 如果有很多内容，可能是在显示输出，命令提示符在最后
-            println!("🔍 调试: 检测到带输出的命令提示符状态，跳过LLM调用");
-            return true;
+            return true; // 带输出的命令提示符状态，跳过LLM调用
         }
     }
     
     // 使用正则表达式检查Claude Code的标准执行条格式
     // 格式：*(状态)… (时间 · tokens · esc to interrupt)
     let execution_bar_pattern = regex::Regex::new(r"\*[^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
+    
     if execution_bar_pattern.is_match(&last_content) {
-        println!("🔍 调试: 检测到标准执行条格式");
         // 有执行条格式，但需要进一步检查是否真的在活动
         // 检查是否有未完成的输出指示符
         if last_content.ends_with("...") || 
@@ -336,7 +321,6 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     // 作为备选，检查更宽松的模式：包含时间和tokens的括号内容
     let time_tokens_pattern = regex::Regex::new(r"\([^)]*\d+s[^)]*tokens[^)]*\)").unwrap();
     if time_tokens_pattern.is_match(&last_content) {
-        println!("🔍 调试: 检测到时间和tokens格式，不跳过LLM调用");
         // 如果只是有时间tokens但没有活动状态，可能已经卡住
         // 这种情况下不应该跳过LLM调用
         return false;
@@ -348,7 +332,8 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
        last_content.ends_with("◦") ||
        last_content.ends_with("•") ||
        last_content.ends_with(">") ||
-       last_content.ends_with("$") {
+       last_content.ends_with("$") ||
+       last_content.ends_with("#") {
         return true;
     }
     
@@ -363,13 +348,7 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
                !last_content.contains("Completed");
     }
     
-    // 检查是否有命令行提示符，可能是在等待用户输入
-    if last_content.contains('$') || last_content.contains('>') || last_content.contains('#') {
-        return true;
-    }
-    
     // 如果以上都不匹配，则不跳过 LLM 调用
-    println!("🔍 调试: 所有条件都不匹配，不跳过LLM调用");
     false
 }
 

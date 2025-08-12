@@ -386,7 +386,7 @@ async fn ask_openrouter_for_activation(prompt: &str, config: &OpenRouterConfig) 
 /// - "openai": 使用 OpenAI 或兼容服务
 /// - "openrouter": 使用 OpenRouter 服务
 /// - "none": 使用简单的启发式判断
-pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Result<TaskStatus, String> {
+pub async fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Result<TaskStatus, String> {
     if backend == "none" {
         // 如果禁用 LLM，使用简单的启发式判断
         return Ok(simple_heuristic_check(text));
@@ -397,15 +397,13 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
 
     match backend.as_ref() {
         "ollama" => {
-            // 使用 tokio 运行时来执行异步函数
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
             let model = config.llm.ollama.as_ref().map(|o| o.model.clone()).unwrap_or("qwen2.5:3b".to_string());
             let url = config.llm.ollama.as_ref().map(|o| o.url.clone()).unwrap_or("http://localhost:11434".to_string());
             
             // 对于 Ollama，我们需要将 system 和 user 内容以合适的格式传递
             let ollama_prompt = format!("### 系统指令\n{}\n\n### 用户内容\n{}", system_prompt, text);
             
-            match rt.block_on(ask_ollama_with_ollama_rs(&ollama_prompt, &model, &url)) {
+            match ask_ollama_with_ollama_rs(&ollama_prompt, &model, &url).await {
                 Ok(response) => {
                     let response = response.trim();
                     match response {
@@ -418,11 +416,8 @@ pub fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Resul
             }
         }
         "openai" => {
-            // 使用 tokio 运行时来执行异步函数
-            let rt = tokio::runtime::Runtime::new().map_err(|e| format!("创建运行时失败: {}", e))?;
-            
             if let Some(openai_config) = &config.llm.openai {
-                match rt.block_on(ask_openai(&system_prompt, &text, &openai_config)) {
+                match ask_openai(&system_prompt, &text, &openai_config).await {
                     Ok(response) => {
                         let response = response.trim();
                         match response {
