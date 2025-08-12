@@ -172,7 +172,7 @@ fn ask_llm_final_status(text: &str, backend: &str, config: &Config) -> Result<Ta
         return Ok(simple_heuristic_check(text));
     }
     
-    let prompt = include_str!("../prompt.md");
+    let prompt = include_str!("../prompt_optimized.md");
     let full_prompt = format!("{}\n\n{}", prompt, text);
 
     match backend.as_ref() {
