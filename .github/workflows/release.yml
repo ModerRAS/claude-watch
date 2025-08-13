@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+
+# 添加必要的权限
+permissions:
+  contents: write
+  packages: write
   workflow_dispatch:
     inputs:
       test_build:
