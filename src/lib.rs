@@ -1,5 +1,6 @@
 pub mod activity;
 pub mod config;
+pub mod logger;
 pub mod monitor;
 pub mod llm;
 pub mod tmux;
