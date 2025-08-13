@@ -18,4 +18,12 @@ reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
-mockito = "1.0"
+
+# Musl构建配置
+[package.metadata.cross.target.x86_64-unknown-linux-musl]
+pre-built = true
+
+# 为musl构建调整依赖
+[target.x86_64-unknown-linux-musl.dependencies]
+# 使用原生tls实现，避免openssl的复杂依赖
+reqwest = { version = "0.12", features = ["json", "native-tls-vendored"] }
