@@ -53,6 +53,7 @@ pub fn is_claude_active(text: &str) -> bool {
             "Writing file",
             "Creating file",
             "Editing file",
+            "Retry",
             "/compact",
         ];
         
