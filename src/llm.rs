@@ -162,6 +162,17 @@ fn simple_heuristic_check(text: &str) -> TaskStatus {
         "所有步骤已完成",
         "代码生成完毕",
         "所有文件已创建完成",
+        // Claude Code特有的完成模式
+        "✅ Task completed",
+        "All done",
+        "Task completed successfully",
+        "Operation completed",
+        "Processing complete",
+        "Generation complete",
+        "Build complete",
+        "Compilation complete",
+        "Analysis complete",
+        "All operations completed",
     ];
     
     if done_patterns.iter().any(|&pattern| text.contains(pattern)) {

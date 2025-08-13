@@ -124,7 +124,7 @@ pub async fn run_monitoring_loop(
                     continue;
                 }
                 
-                // 如果时间没有递增，再进行其他检查
+                // 如果时间没有递增，先检查启发式完成判断
                 let should_skip_llm = check_if_should_skip_llm_call(&text);
                 
                 if should_skip_llm {
@@ -135,6 +135,18 @@ pub async fn run_monitoring_loop(
                     continue;
                 }
                 
+                // 优先进行启发式完成检查，避免不必要的LLM调用
+                let final_status = crate::llm::simple_heuristic_check(&text);
+                if final_status == crate::llm::TaskStatus::Done {
+                    println!("✅ 启发式检查确认任务已完成，进入完成状态监控...");
+                    // 进入完成状态监控循环
+                    if monitor_completion_state(&config.tmux.pane).is_err() {
+                        println!("⚠️ 完成状态监控中断，重新开始正常监控");
+                    }
+                    continue;
+                }
+                
+                // 如果启发式检查无法确定，再使用LLM进行最终判断
                 match ask_llm_final_status(&text, &config.llm.backend, config).await {
                     Ok(TaskStatus::Done) => {
                         println!("✅ LLM 确认任务已完成，进入完成状态监控...");
