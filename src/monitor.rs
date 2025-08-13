@@ -107,7 +107,7 @@ pub async fn run_monitoring_loop(
             *last_active = Instant::now();
             *retry_count = 0;
             if has_content_changed {
-                println!("🔄 检测到内容变化，Claude Code 正在工作中...");
+                println!("[{}] 🔄 检测到内容变化，Claude Code 正在工作中...", chrono::Local::now().format("%H:%M:%S"));
             } else {
                 println!("🔄 Claude Code 正在工作中...");
             }

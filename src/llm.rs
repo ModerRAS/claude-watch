@@ -146,6 +146,7 @@ async fn ask_openai(system_prompt: &str, user_content: &str, config: &crate::con
 /// 简化的启发式检查（仅在 LLM 不可用时使用）
 pub fn simple_heuristic_check(text: &str) -> TaskStatus {
     // 检查明显的完成标志
+    // 注意：移除了"Done"，因为它只是agent执行完成，不表示整体任务完成
     let done_patterns = [
         "✅ All checks passed",
         "Build completed successfully", 
@@ -156,7 +157,6 @@ pub fn simple_heuristic_check(text: &str) -> TaskStatus {
         "完成了",
         "Finished",
         "Completed",
-        "Done",
         "✅",
         "工作已完成",
         "所有步骤已完成",

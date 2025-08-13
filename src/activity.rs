@@ -22,6 +22,11 @@ pub fn is_claude_active(text: &str) -> bool {
         // 检查Claude Code的标准读秒格式：*(状态)… (时间 · 数量 tokens · esc to interrupt)
         // 例如：* Herding… (343s · ↑ 14.2k tokens · esc to interrupt)
         if trimmed.contains('(') && trimmed.contains(')') && trimmed.contains("tokens") {
+            // 特殊处理：如果是Done状态，不认为是活动状态
+            if trimmed.contains("Done") {
+                return false; // Done状态不是活动状态
+            }
+            
             // 检查是否有时间格式（数字+s）在括号内
             let time_pattern = regex::Regex::new(r"\((\d+s)").unwrap();
             if time_pattern.is_match(trimmed) {
