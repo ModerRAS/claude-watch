@@ -21,9 +21,9 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Install musl tools
+    - name: Install musl tools and build dependencies
       run: |
-        apt-get update && apt-get install -y musl musl-tools musl-dev
+        apt-get update && apt-get install -y musl musl-tools musl-dev make
 
     - name: Set up Rust toolchain
       run: |
