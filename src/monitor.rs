@@ -299,8 +299,7 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     // 首先检查明确的中断状态 - 这些状态不应该跳过LLM调用
     if last_content.contains("Interrupted by user") ||
        last_content.contains("Aborted by user") ||
-       last_content.contains("Cancelled by user") ||
-       last_content.contains("Interrupted") {
+       last_content.contains("Cancelled by user") {
         return false; // 明确中断状态，不跳过LLM调用
     }
     
@@ -354,7 +353,9 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         ];
         
         for keyword in &active_keywords {
-            if last_content.contains(keyword) {
+            // 检查是否在Claude Code的上下文中（有tokens或执行条）
+            if (last_content.contains(keyword) && last_content.contains("tokens")) ||
+               last_content.contains("* Compiling") || last_content.contains("* Building") {
                 return true; // 有活动状态关键词，认为正在活动
             }
         }
