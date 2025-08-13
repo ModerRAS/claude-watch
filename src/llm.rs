@@ -144,7 +144,7 @@ async fn ask_openai(system_prompt: &str, user_content: &str, config: &crate::con
 }
 
 /// 简化的启发式检查（仅在 LLM 不可用时使用）
-fn simple_heuristic_check(text: &str) -> TaskStatus {
+pub fn simple_heuristic_check(text: &str) -> TaskStatus {
     // 检查明显的完成标志
     let done_patterns = [
         "✅ All checks passed",
@@ -480,7 +480,7 @@ pub async fn ask_llm_final_status(text: &str, backend: &str, config: &Config) ->
                         let json: Value = resp.into_json().map_err(|e| e.to_string())?;
                         let response = json["choices"][0]["message"]["content"]
                             .as_str()
-                            .unwrap_or("")
+                            .unwrap_or("[空响应]")
                             .trim();
                         match response {
                             "DONE" => Ok(TaskStatus::Done),
