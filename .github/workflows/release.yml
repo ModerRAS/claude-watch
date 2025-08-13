@@ -21,15 +21,17 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Show rustc version
-      run: rustc --version && cargo --version
-
     - name: Install musl tools
       run: |
         apt-get update && apt-get install -y musl musl-tools musl-dev
 
-    - name: Add musl target
-      run: rustup target add x86_64-unknown-linux-musl
+    - name: Set up Rust toolchain
+      run: |
+        rustup default stable
+        rustup target add x86_64-unknown-linux-musl
+
+    - name: Show rustc version
+      run: rustc --version && cargo --version
 
     - name: Cache cargo registry
       uses: actions/cache@v4
