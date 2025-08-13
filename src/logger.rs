@@ -1,5 +1,5 @@
 use std::io::{self, Write};
-use chrono::{DateTime, Local};
+use chrono::Local;
 use log::{Level, LevelFilter, SetLoggerError};
 
 /// 自定义日志器，支持颜色输出和结构化格式
@@ -69,7 +69,7 @@ impl log::Log for ClaudeLogger {
 /// 初始化日志系统
 pub fn init_logger(level: LevelFilter, use_colors: bool) -> Result<(), SetLoggerError> {
     let logger = ClaudeLogger::new(level, use_colors);
-    log::set_boxed_logger(logger)
+    log::set_logger(&logger)
 }
 
 /// 记录监控相关事件（带上下文信息）
@@ -183,6 +183,60 @@ impl MonitorLogger {
     }
 }
 
+impl log::Log for ClaudeLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= self.level
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.enabled(record.metadata()) {
+            let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            let level = record.level();
+            let (level_str, color_code) = match level {
+                Level::Error => ("ERROR", "\x1b[31m"), // 红色
+                Level::Warn => ("WARN ", "\x1b[33m"),  // 黄色
+                Level::Info => ("INFO ", "\x1b[32m"), // 绿色
+                Level::Debug => ("DEBUG", "\x1b[36m"), // 蓝色
+                Level::Trace => ("TRACE", "\x1b[35m"), // 紫色
+            };
+
+            // 构建结构化日志格式
+            let formatted = if self.use_colors {
+                format!(
+                    "{} [{}] {} | {}{}: {}{}\x1b[0m",
+                    timestamp,
+                    record.target(),
+                    level_str,
+                    color_code,
+                    level_str,
+                    color_code,
+                    record.args()
+                )
+            } else {
+                format!(
+                    "{} [{}] {} | {}: {}",
+                    timestamp,
+                    record.target(),
+                    level_str,
+                    level_str,
+                    record.args()
+                )
+            };
+
+            // 确保原子性写入
+            let mut stdout = io::stdout();
+            let _ = stdout.write_all(formatted.as_bytes());
+            let _ = stdout.write_all(b"\n");
+            let _ = stdout.flush();
+        }
+    }
+
+    fn flush(&self) {
+        use std::io::Write;
+        let _ = io::stdout().flush();
+    }
+}
+
 /// 全局监控日志器实例
 static mut GLOBAL_MONITOR_LOGGER: Option<MonitorLogger> = None;
 
@@ -200,61 +254,3 @@ pub fn monitor_logger() -> &'static MonitorLogger {
     }
 }
 
-/// 便捷宏 - 记录内容变化
-#[macro_export]
-macro_rules! log_content_change {
-    ($pane:expr, $details:expr) => {
-        crate::logger::monitor_logger().log_content_change($pane, $details);
-    };
-}
-
-/// 便捷宏 - 记录卡住检测
-#[macro_export]
-macro_rules! log_stuck_detection {
-    ($pane:expr, $stuck_sec:expr) => {
-        crate::logger::monitor_logger().log_stuck_detection($pane, $stuck_sec);
-    };
-}
-
-/// 便捷宏 - 记录LLM状态判断
-#[macro_export]
-macro_rules! log_llm_judgment {
-    ($status:expr) => {
-        crate::logger::monitor_logger().log_llm_judgment($status, None);
-    };
-    ($status:expr, $confidence:expr) => {
-        crate::logger::monitor_logger().log_llm_judgment($status, Some($confidence));
-    };
-}
-
-/// 便捷宏 - 记录激活尝试
-#[macro_export]
-macro_rules! log_activation_attempt {
-    ($method:expr, $success:expr) => {
-        crate::logger::monitor_logger().log_activation_attempt($method, $success);
-    };
-}
-
-/// 便捷宏 - 记录完成状态监控
-#[macro_export]
-macro_rules! log_completion_monitoring {
-    ($pane:expr, $check_count:expr) => {
-        crate::logger::monitor_logger().log_completion_monitoring($pane, $check_count);
-    };
-}
-
-/// 便捷宏 - 记录错误
-#[macro_export]
-macro_rules! log_error {
-    ($context:expr, $error:expr) => {
-        crate::logger::monitor_logger().log_error($context, $error);
-    };
-}
-
-/// 便捷宏 - 记录警告
-#[macro_export]
-macro_rules! log_warning {
-    ($context:expr, $warning:expr) => {
-        crate::logger::monitor_logger().log_warning($context, $warning);
-    };
-}

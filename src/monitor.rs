@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::io;
 
-use crate::logger::{log_content_change, log_stuck_detection, log_llm_judgment, log_activation_attempt, log_completion_monitoring, log_error, log_warning, init_monitor_logger, log};
+use crate::logger::{log_content_change, log_stuck_detection, log_llm_judgment, log_activation_attempt, log_completion_monitoring, log_error, log_warning, init_monitor_logger};
 
 /// 全局状态，用于追踪时间变化
 static mut TIME_TRACKER: Option<HashMap<String, u64>> = None;
