@@ -4,11 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-
-# 添加必要的权限
-permissions:
-  contents: write
-  packages: write
   workflow_dispatch:
     inputs:
       test_build:
@@ -17,11 +12,19 @@ permissions:
         default: 'false'
         type: boolean
 
+# 添加必要的权限
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   build-musl:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/cross-rs/cross:latest
+    permissions:
+      contents: write
+      packages: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
