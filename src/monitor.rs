@@ -69,20 +69,35 @@ pub async fn run_monitoring_loop(
     loop {
         let text = capture(&config.tmux.pane);
         
-        // 新增：基于内容变化的活动检测 - 这是最可靠的方法
-        let has_content_changed = unsafe {
-            static mut LAST_CONTENT: String = String::new();
-            if LAST_CONTENT.is_empty() {
-                // 第一次运行，有内容就认为有变化
-                LAST_CONTENT.clone_from(&text);
-                true
-            } else {
-                // 比较当前内容和上一次内容是否不同
-                let changed = text.trim() != LAST_CONTENT.trim();
-                if changed {
-                    LAST_CONTENT.clone_from(&text);
+        // 新增：基于内容变化的活动检测 - 优化版本，使用线程安全的方式
+        let has_content_changed = {
+            use std::sync::Mutex;
+            use std::sync::Once;
+            static INIT: Once = Once::new();
+            static mut LAST_CONTENT: Option<Mutex<String>> = None;
+            
+            unsafe {
+                INIT.call_once(|| {
+                    LAST_CONTENT = Some(Mutex::new(String::new()));
+                });
+            }
+            
+            if let Some(ref content_mutex) = unsafe { &LAST_CONTENT } {
+                let mut last_content = content_mutex.lock().unwrap();
+                if last_content.is_empty() {
+                    // 第一次运行，有内容就认为有变化
+                    last_content.clone_from(&text);
+                    true
+                } else {
+                    // 智能内容变化检测：忽略纯时间变化和系统信息变化
+                    let changed = has_substantial_content_change(&text, &last_content);
+                    if changed {
+                        last_content.clone_from(&text);
+                    }
+                    changed
                 }
-                changed
+            } else {
+                true // 理论上不会到达这里
             }
         };
         
@@ -534,4 +549,87 @@ pub fn is_just_time_counter(text: &str) -> bool {
     }
     
     false
+}
+
+/// 智能判断两个文本之间是否有实质性变化
+/// 
+/// 这个函数用于区分实质性的内容变化和无意义的微小变化（如时间计数器变化）
+/// 原本实现：简单的字符串比较 text.trim() != LAST_CONTENT.trim()
+/// 简化实现：忽略纯时间数字变化、token计数变化、系统界面信息变化，只检测实质性变化
+/// 相关文件：monitor.rs
+/// 相关方法：has_substantial_content_change()
+fn has_substantial_content_change(current_text: &str, previous_text: &str) -> bool {
+    // 如果内容完全相同，显然没有变化
+    if current_text.trim() == previous_text.trim() {
+        return false;
+    }
+    
+    // 提取两个文本的核心内容（忽略时间数字变化等）
+    let current_core = extract_core_content(current_text);
+    let previous_core = extract_core_content(previous_text);
+    
+    // 比较核心内容是否有差异
+    current_core != previous_core
+}
+
+/// 提取文本的核心内容，忽略无意义的变化
+/// 
+/// 这个函数会移除或标准化那些会频繁变化但不代表实质性活动的内容：
+/// 1. 时间数字变化 (56s → 57s)
+/// 2. Token计数变化 (34 tokens → 35 tokens)  
+/// 3. 系统界面信息变化 (如 "? for shortcuts" 的显示/隐藏)
+/// 4. 光标闪烁或界面微更新
+fn extract_core_content(text: &str) -> String {
+    let mut processed = text.to_string();
+    
+    // 1. 移除时间数字变化 - 替换所有 \d+s 为固定格式
+    let time_pattern = regex::Regex::new(r"(\d+)s").unwrap();
+    processed = time_pattern.replace_all(&processed, "[TIME]").to_string();
+    
+    // 2. 移除token计数变化 - 替换token相关的数字
+    let token_patterns = [
+        r"(\d+)\s*tokens?",
+        r"↑\s*(\d+)\s*tokens?",
+        r"↓\s*(\d+)\s*tokens?",
+        r"⚒\s*(\d+)\s*tokens?",
+    ];
+    
+    for pattern in &token_patterns {
+        let token_regex = regex::Regex::new(pattern).unwrap();
+        processed = token_regex.replace_all(&processed, "[TOKENS]").to_string();
+    }
+    
+    // 3. 移除系统界面信息变化 - 这些是Claude Code界面的辅助信息
+    let system_info_patterns = [
+        r"\?\s+for\s+shortcuts",
+        r"Bypassing\s+Permissions",
+        r"╭─*╮",
+        r"╰─*╯",
+        r"│.*│",  // 移除边框线内容
+    ];
+    
+    for pattern in &system_info_patterns {
+        let system_regex = regex::Regex::new(pattern).unwrap();
+        processed = system_regex.replace_all(&processed, "").to_string();
+    }
+    
+    // 4. 标准化空白字符 - 移除多余的空格、换行等
+    processed = regex::Regex::new(r"\s+").unwrap().replace_all(&processed.trim(), " ").to_string();
+    
+    // 5. 移除常见的状态指示符变化 - 这些会频繁变化但不代表实质性活动
+    let status_patterns = [
+        r"✽", r"✶", r"●", r"◦", r"▪", r"▬",  // 状态图标
+        r"Cogitating", r"Contemplating", r"Herding", r"Meandering", r"Reticulating",  // 状态词汇（这些词本身会变化，但如果其他内容没变，不算实质性变化）
+    ];
+    
+    for pattern in &status_patterns {
+        let status_regex = regex::Regex::new(pattern).unwrap();
+        processed = status_regex.replace_all(&processed, "[STATUS]").to_string();
+    }
+    
+    // 最终清理：移除连续的替换标记和多余空格
+    processed = regex::Regex::new(r"\[STATUS\]\s*\[STATUS\]\s*").unwrap().replace_all(&processed, "[STATUS] ").to_string();
+    processed = regex::Regex::new(r"\s+").unwrap().replace_all(&processed.trim(), " ").to_string();
+    
+    processed.trim().to_string()
 }
