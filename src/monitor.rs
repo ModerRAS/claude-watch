@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use std::io;
 
+use crate::logger::{log_content_change, log_stuck_detection, log_llm_judgment, log_activation_attempt, log_completion_monitoring, log_error, log_warning, init_monitor_logger, log};
+
 /// 全局状态，用于追踪时间变化
 static mut TIME_TRACKER: Option<HashMap<String, u64>> = None;
 
@@ -107,18 +109,18 @@ pub async fn run_monitoring_loop(
             *last_active = Instant::now();
             *retry_count = 0;
             if has_content_changed {
-                println!("🔄 检测到内容变化，Claude Code 正在工作中...");
+                log_content_change!(&config.tmux.pane, "Claude Code 正在工作中");
             } else {
-                println!("🔄 Claude Code 正在工作中...");
+                log_content_change!(&config.tmux.pane, "Claude Code 有活动但不检测到变化");
             }
         } else {
             // Claude Code 不活动，检查是否超时
             if last_active.elapsed() >= Duration::from_secs(config.monitoring.stuck_sec) {
-                println!("⏸️ Claude Code 停止工作超过 {} 秒，调用 LLM 判断状态...", config.monitoring.stuck_sec);
+                log_stuck_detection!(&config.tmux.pane, config.monitoring.stuck_sec);
                 
                 // 关键改进：检查时间是否在递增，这是最可靠的活动指示
                 if is_time_increasing(&text, &config.tmux.pane) {
-                    println!("🔄 检测到时间在递增，Claude Code 正在工作中，跳过 LLM 调用...");
+                    log_content_change!(&config.tmux.pane, "检测到时间在递增，Claude Code 正在工作中，跳过 LLM 调用");
                     *last_active = Instant::now();
                     thread::sleep(Duration::from_secs(config.monitoring.interval));
                     continue;
@@ -128,7 +130,7 @@ pub async fn run_monitoring_loop(
                 let should_skip_llm = check_if_should_skip_llm_call(&text);
                 
                 if should_skip_llm {
-                    println!("🔄 检测到可能仍在处理的状态，跳过 LLM 调用，继续观察...");
+                    log_content_change!(&config.tmux.pane, "检测到可能仍在处理的状态，跳过 LLM 调用，继续观察...");
                     // 重置计时器，给予更多时间
                     *last_active = Instant::now();
                     thread::sleep(Duration::from_secs(config.monitoring.interval));
@@ -138,10 +140,10 @@ pub async fn run_monitoring_loop(
                 // 优先进行启发式完成检查，避免不必要的LLM调用
                 let final_status = crate::llm::simple_heuristic_check(&text);
                 if final_status == crate::llm::TaskStatus::Done {
-                    println!("✅ 启发式检查确认任务已完成，进入完成状态监控...");
+                    log_content_change!(&config.tmux.pane, "启发式检查确认任务已完成，进入完成状态监控");
                     // 进入完成状态监控循环
                     if monitor_completion_state(&config.tmux.pane).is_err() {
-                        println!("⚠️ 完成状态监控中断，重新开始正常监控");
+                        log_warning!("monitor_completion_state", "完成状态监控中断，重新开始正常监控");
                     }
                     continue;
                 }
@@ -149,7 +151,8 @@ pub async fn run_monitoring_loop(
                 // 如果启发式检查无法确定，再使用LLM进行最终判断
                 match ask_llm_final_status(&text, &config.llm.backend, config).await {
                     Ok(TaskStatus::Done) => {
-                        println!("✅ LLM 确认任务已完成，进入完成状态监控...");
+                        log_llm_judgment!("DONE");
+                        log_content_change!(&config.tmux.pane, "LLM 确认任务已完成，进入完成状态监控");
                         // 进入完成状态监控循环
                         if monitor_completion_state(&config.tmux.pane).is_err() {
                             println!("⚠️ 完成状态监控中断，重新开始正常监控");
@@ -291,8 +294,8 @@ fn monitor_completion_state(pane: &str) -> Result<(), String> {
             println!("💤 仍在完成状态，持续监控中... (检查次数: {})", check_count);
         }
         
-        // 睡眠 60 秒（1 分钟）
-        thread::sleep(Duration::from_secs(60));
+        // 睡眠 120 秒（2 分钟）- 避免频繁检查
+        thread::sleep(Duration::from_secs(120));
     }
 }
 
@@ -316,7 +319,7 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     }
     
     // 检查是否在命令提示符状态 - Claude Code在命令提示符状态时是空闲的
-    // 只有命令提示符且没有其他活动内容时，不应该跳过LLM调用
+    // 只有命令提示符且没有其他活动内容时，应该调用LLM判断
     let trimmed_content = last_content.trim();
     
     if trimmed_content.ends_with('>') || 
@@ -329,11 +332,11 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
             .filter(|line| !line.trim().is_empty())
             .collect();
         
-        // 如果只有命令提示符行，或者主要内容就是命令提示符，则是空闲状态
+        // 如果只有命令提示符行（最多2行），则是空闲状态，应该调用LLM
         if non_empty_lines.len() <= 2 {
-            return false; // 纯命令提示符状态，不跳过LLM调用
+            return false; // 纯命令提示符状态，应该调用LLM判断
         } else {
-            return true; // 带输出的命令提示符状态，跳过LLM调用
+            return true; // 有其他输出的命令提示符状态，跳过LLM调用
         }
     }
     
