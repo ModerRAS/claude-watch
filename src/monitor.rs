@@ -318,7 +318,7 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     }
     
     // 检查是否在命令提示符状态 - Claude Code在命令提示符状态时是空闲的
-    // 只有命令提示符且没有其他活动内容时，应该调用LLM判断
+    // 只有命令提示符且没有其他活动内容时，应该跳过LLM调用
     let trimmed_content = last_content.trim();
     
     if trimmed_content.ends_with('>') || 
@@ -331,11 +331,11 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
             .filter(|line| !line.trim().is_empty())
             .collect();
         
-        // 如果只有命令提示符行（最多2行），则是空闲状态，应该调用LLM
+        // 如果只有命令提示符行（最多2行），则是空闲状态，应该跳过LLM调用
         if non_empty_lines.len() <= 2 {
-            return false; // 纯命令提示符状态，应该调用LLM判断
+            return true; // 纯命令提示符状态，应该跳过LLM调用
         } else {
-            return true; // 有其他输出的命令提示符状态，跳过LLM调用
+            return false; // 有其他输出的命令提示符状态，应该调用LLM判断
         }
     }
     
@@ -378,9 +378,9 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     // 作为备选，检查更宽松的模式：包含时间和tokens的括号内容
     let time_tokens_pattern = regex::Regex::new(r"\([^)]*\d+s[^)]*tokens[^)]*\)").unwrap();
     if time_tokens_pattern.is_match(&last_content) {
-        // 如果只是有时间tokens但没有活动状态，可能已经卡住
-        // 这种情况下不应该跳过LLM调用
-        return false;
+        // 如果有时间tokens但没有活动状态，说明Claude Code还在运行中
+        // 这种情况下应该跳过LLM调用
+        return true;
     }
     
     // 检查是否有未完成的输出

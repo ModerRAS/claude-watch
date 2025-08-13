@@ -232,8 +232,8 @@ fn test_monitoring_decision_matrix() {
         ),
         (
             "$ ls -la",
-            false, true, true,
-            "命令提示符"
+            false, false, false,
+            "命令提示符（无实质性进展，不以$结尾）"
         ),
         (
             "* 104s\n* 105s",
