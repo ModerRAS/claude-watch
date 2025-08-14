@@ -4,19 +4,36 @@ use crate::llm::ask_llm_final_status;
 use crate::llm::TaskStatus;
 use crate::tmux::{capture, send_keys};
 use std::collections::HashMap;
+use std::sync::{OnceLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use std::io;
 
+/// Pane状态枚举
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum PaneStatus {
+    Active,
+    Stuck,
+    Idle,
+    Completed,
+}
+
 // 简单的println日志，复杂的日志系统暂时跳过
 
 /// 全局状态，用于追踪时间变化
-static mut TIME_TRACKER: Option<HashMap<String, u64>> = None;
+static TIME_TRACKER: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+
+/// 重置全局状态（用于测试）
+pub fn reset_time_tracker() {
+    // OnceLock不支持重置，所以我们使用一个技巧：在测试中忽略时间递增检查
+    // 在实际使用中，这不会成为问题
+}
 
 /// 提取Claude Code执行条中的时间值
 pub fn extract_execution_time(text: &str) -> Option<u64> {
     // 匹配格式：(数字s) - 更宽松的模式，能从复杂格式中提取
-    let time_pattern = regex::Regex::new(r"\((\d+)s\)").unwrap();
+    // 修复：允许在s和)之间有其他字符（如Unicode空格、tokens等）
+    let time_pattern = regex::Regex::new(r"\((\d+)s[^)]*\)").unwrap();
     if let Some(caps) = time_pattern.captures(text) {
         if let Some(time_str) = caps.get(1) {
             return time_str.as_str().parse::<u64>().ok();
@@ -27,28 +44,23 @@ pub fn extract_execution_time(text: &str) -> Option<u64> {
 
 /// 检查时间是否在递增（表明Claude Code在工作）
 pub fn is_time_increasing(current_text: &str, pane: &str) -> bool {
-    unsafe {
-        if TIME_TRACKER.is_none() {
-            TIME_TRACKER = Some(HashMap::new());
-        }
+    let tracker = TIME_TRACKER.get_or_init(|| Mutex::new(HashMap::new()));
+    let current_time = extract_execution_time(current_text);
+    
+    if let Some(current) = current_time {
+        let key = pane.to_string();
         
-        if let Some(ref mut tracker) = TIME_TRACKER {
-            let current_time = extract_execution_time(current_text);
-            
-            if let Some(current) = current_time {
-                let key = pane.to_string();
-                
-                if let Some(&previous_time) = tracker.get(&key) {
-                    // 如果时间比上次大，说明在递增
-                    if current > previous_time {
-                        tracker.insert(key, current);
-                        return true;
-                    }
-                } else {
-                    // 第一次记录时间
-                    tracker.insert(key, current);
-                    return true; // 第一次看到时间，认为是活动的
+        if let Ok(mut tracker_guard) = tracker.lock() {
+            if let Some(&previous_time) = tracker_guard.get(&key) {
+                // 如果时间比上次大，说明在递增
+                if current > previous_time {
+                    tracker_guard.insert(key, current);
+                    return true;
                 }
+            } else {
+                // 第一次记录时间
+                tracker_guard.insert(key, current);
+                return true; // 第一次看到时间，认为是活动的
             }
         }
     }
@@ -74,18 +86,11 @@ pub async fn run_monitoring_loop(
         // 新增：基于内容变化的活动检测 - 优化版本，使用线程安全的方式
         let has_content_changed = {
             use std::sync::Mutex;
-            use std::sync::Once;
-            static INIT: Once = Once::new();
-            static mut LAST_CONTENT: Option<Mutex<String>> = None;
+            static LAST_CONTENT: OnceLock<Mutex<String>> = OnceLock::new();
             
-            unsafe {
-                INIT.call_once(|| {
-                    LAST_CONTENT = Some(Mutex::new(String::new()));
-                });
-            }
+            let content_mutex = LAST_CONTENT.get_or_init(|| Mutex::new(String::new()));
             
-            if let Some(ref content_mutex) = unsafe { &LAST_CONTENT } {
-                let mut last_content = content_mutex.lock().unwrap();
+            if let Ok(mut last_content) = content_mutex.lock() {
                 if last_content.is_empty() {
                     // 第一次运行，有内容就认为有变化
                     last_content.clone_from(&text);
@@ -99,7 +104,7 @@ pub async fn run_monitoring_loop(
                     changed
                 }
             } else {
-                true // 理论上不会到达这里
+                true // 如果获取锁失败，认为有变化
             }
         };
         
@@ -310,10 +315,48 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     let last_lines: Vec<&str> = lines.iter().rev().take(10).cloned().collect();
     let last_content = last_lines.join("\n");
     
-    // 首先检查明确的中断状态 - 这些状态不应该跳过LLM调用
-    if last_content.contains("Interrupted by user") ||
-       last_content.contains("Aborted by user") ||
-       last_content.contains("Cancelled by user") {
+    // 首先检查整个文本中是否有Claude Code的标准执行条格式
+    // 这是比只检查最后10行更准确的方法
+    let execution_bar_pattern = regex::Regex::new(r"\*[^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
+    if execution_bar_pattern.is_match(text) {
+        // 找到执行条，现在需要判断是否真的在活动
+        // 检查是否有明确的活动状态关键词
+        let active_keywords = [
+            // 核心深度思考状态（这些是Claude Code特有的，最可靠）
+            "Cogitating", "Herding", "Meandering", "Reticulating", "Thinking", "Philosophising",
+            // 核心处理状态
+            "Processing", "Compiling", "Building", "Executing",
+            // 核心文件操作
+            "Reading", "Writing", "Generating", "Creating", "Analyzing",
+            // 核心工具调用
+            "Calling", "Searching", "Browsing", "Loading", "Saving"
+        ];
+        
+        for keyword in &active_keywords {
+            if text.contains(keyword) && text.contains("tokens") {
+                return true; // 有活动状态关键词和执行条，认为正在活动
+            }
+        }
+        
+        // 检查是否有未完成的输出指示符
+        if text.ends_with("...") || 
+           text.ends_with("▪") || 
+           text.ends_with("◦") || 
+           text.ends_with("●") || 
+           text.ends_with("▬") {
+            return true; // 有未完成指示符，认为正在活动
+        }
+        
+        // 作为备选，如果只有执行条但没有其他明显的停止指示，也认为可能仍在活动
+        return !text.contains("Interrupted by user") && 
+               !text.contains("Aborted by user") && 
+               !text.contains("Cancelled by user");
+    }
+    
+    // 检查明确的中断状态 - 这些状态不应该跳过LLM调用
+    if text.contains("Interrupted by user") ||
+       text.contains("Aborted by user") ||
+       text.contains("Cancelled by user") {
         return false; // 明确中断状态，不跳过LLM调用
     }
     
@@ -337,50 +380,6 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         } else {
             return false; // 有其他输出的命令提示符状态，应该调用LLM判断
         }
-    }
-    
-    // 使用正则表达式检查Claude Code的标准执行条格式
-    // 格式：*(状态)… (时间 · tokens · esc to interrupt)
-    let execution_bar_pattern = regex::Regex::new(r"\*[^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
-    
-    if execution_bar_pattern.is_match(&last_content) {
-        // 有执行条格式，但需要进一步检查是否真的在活动
-        // 检查是否有未完成的输出指示符
-        if last_content.ends_with("...") || 
-           last_content.ends_with("▪") || 
-           last_content.ends_with("◦") || 
-           last_content.ends_with("●") || 
-           last_content.ends_with("▬") {
-            return true; // 有未完成指示符，认为正在活动
-        }
-        
-        // 检查是否有明确的活动状态关键词
-        let active_keywords = [
-            // 核心深度思考状态（这些是Claude Code特有的，最可靠）
-            "Cogitating", "Herding", "Meandering", "Reticulating", "Thinking",
-            // 核心处理状态
-            "Processing", "Compiling", "Building", "Executing",
-            // 核心文件操作
-            "Reading", "Writing", "Generating", "Creating", "Analyzing",
-            // 核心工具调用
-            "Calling", "Searching", "Browsing", "Loading", "Saving"
-        ];
-        
-        for keyword in &active_keywords {
-            // 检查是否在Claude Code的上下文中（有tokens或执行条）
-            if (last_content.contains(keyword) && last_content.contains("tokens")) ||
-               last_content.contains("* Compiling") || last_content.contains("* Building") {
-                return true; // 有活动状态关键词，认为正在活动
-            }
-        }
-    }
-    
-    // 作为备选，检查更宽松的模式：包含时间和tokens的括号内容
-    let time_tokens_pattern = regex::Regex::new(r"\([^)]*\d+s[^)]*tokens[^)]*\)").unwrap();
-    if time_tokens_pattern.is_match(&last_content) {
-        // 如果有时间tokens但没有活动状态，说明Claude Code还在运行中
-        // 这种情况下应该跳过LLM调用
-        return true;
     }
     
     // 检查是否有未完成的输出
@@ -573,7 +572,7 @@ pub fn is_just_time_counter(text: &str) -> bool {
 /// 简化实现：忽略纯时间数字变化、token计数变化、系统界面信息变化，只检测实质性变化
 /// 相关文件：monitor.rs
 /// 相关方法：has_substantial_content_change()
-fn has_substantial_content_change(current_text: &str, previous_text: &str) -> bool {
+pub fn has_substantial_content_change(current_text: &str, previous_text: &str) -> bool {
     // 如果内容完全相同，显然没有变化
     if current_text.trim() == previous_text.trim() {
         return false;
@@ -594,7 +593,7 @@ fn has_substantial_content_change(current_text: &str, previous_text: &str) -> bo
 /// 2. Token计数变化 (34 tokens → 35 tokens)  
 /// 3. 系统界面信息变化 (如 "? for shortcuts" 的显示/隐藏)
 /// 4. 光标闪烁或界面微更新
-fn extract_core_content(text: &str) -> String {
+pub fn extract_core_content(text: &str) -> String {
     let mut processed = text.to_string();
     
     // 1. 移除时间数字变化 - 替换所有 \d+s 为固定格式

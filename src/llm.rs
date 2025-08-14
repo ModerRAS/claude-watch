@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 // tokio imported implicitly through async functions
 
 /// 任务状态枚举
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum TaskStatus {
     Done,
     Stuck,

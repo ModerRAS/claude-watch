@@ -1,0 +1,10 @@
+
+  请显示当前时间
+  echo 'test message'
+╭────────────────────────────────────────────────────────────────╮
+│ > Press up to edit queued messages                             │
+╰────────────────────────────────────────────────────────────────╯
+  ? for shortcuts                          Bypassing Permissions
+
+
+

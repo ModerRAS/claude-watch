@@ -1,0 +1,15 @@
+mpt 2/10)
+  ⎿  API Error (Request timed out.) · Retrying in 2 seconds… (atte
+mpt 3/10)
+
+* Philosophising… (500s · ↓ 7 tokens · esc to interrupt)
+
+  请显示当前时间
+  echo 'test message'
+╭────────────────────────────────────────────────────────────────╮
+│ > Press up to edit queued messages                             │
+╰────────────────────────────────────────────────────────────────╯
+  ? for shortcuts                          Bypassing Permissions
+
+
+
