@@ -210,6 +210,10 @@ fn test_real_data_performance() {
         "user_input_state.txt", 
         "processing_response.txt",
         "philosophising_tail.txt",
+        "interrupted_state.txt",
+        "working_state.txt",
+        "processing_state.txt",
+        "completed_state.txt",
     ];
     
     // 测试处理所有真实数据的性能
@@ -243,6 +247,10 @@ fn test_test_data_files_exist() {
         "user_input_state.txt",
         "processing_response.txt", 
         "philosophising_tail.txt",
+        "interrupted_state.txt",
+        "working_state.txt",
+        "processing_state.txt",
+        "completed_state.txt",
     ];
     
     for filename in &test_files {
@@ -254,6 +262,117 @@ fn test_test_data_files_exist() {
         
         println!("✅ 测试数据文件 {} 验证通过", filename);
     }
+}
+
+/// 测试中断状态界面
+#[test]
+fn test_interrupted_state_interface() {
+    let interface_data = load_interface_data("interrupted_state.txt");
+    
+    println!("\n=== 测试中断状态界面 ===");
+    println!("界面内容:\n{}", interface_data);
+    
+    // 基本验证
+    assert!(!interface_data.is_empty(), "界面数据不应为空");
+    assert!(interface_data.contains("Combobulating"), "应该包含Claude Code状态");
+    assert!(interface_data.contains("没让你测试claude-watch运行"), "应该包含用户对话内容");
+    
+    // 活动检测
+    let is_active = is_claude_active(&interface_data);
+    assert!(is_active, "中断状态应该被识别为活动状态");
+    println!("✅ 活动检测正确");
+    
+    // 时间提取
+    let time = extract_execution_time(&interface_data);
+    assert!(time.is_some(), "应该能够提取时间");
+    println!("✅ 时间提取正确: {:?}", time);
+    
+    // 跳过LLM调用逻辑 - 有执行条格式应该跳过
+    let should_skip = check_if_should_skip_llm_call(&interface_data);
+    assert!(should_skip, "有执行条格式应该跳过LLM调用");
+    println!("✅ 中断状态判断正确");
+}
+
+/// 测试工作状态界面
+#[test]
+fn test_working_state_interface() {
+    let interface_data = load_interface_data("working_state.txt");
+    
+    println!("\n=== 测试工作状态界面 ===");
+    println!("界面内容:\n{}", interface_data);
+    
+    // 基本验证
+    assert!(!interface_data.is_empty(), "界面数据不应为空");
+    assert!(interface_data.contains("请写一个简单的Python程序"), "应该包含用户输入");
+    assert!(interface_data.contains("Combobulating"), "应该包含Claude Code状态");
+    
+    // 活动检测
+    let is_active = is_claude_active(&interface_data);
+    assert!(is_active, "工作状态应该被识别为活动状态");
+    println!("✅ 活动检测正确");
+    
+    // 时间提取
+    let time = extract_execution_time(&interface_data);
+    assert!(time.is_some(), "应该能够提取时间");
+    println!("✅ 时间提取正确: {:?}", time);
+    
+    // 跳过LLM调用逻辑 - 工作状态应该跳过
+    let should_skip = check_if_should_skip_llm_call(&interface_data);
+    assert!(should_skip, "工作状态应该跳过LLM调用");
+    println!("✅ 工作状态判断正确");
+}
+
+/// 测试处理状态界面
+#[test]
+fn test_processing_state_interface() {
+    let interface_data = load_interface_data("processing_state.txt");
+    
+    println!("\n=== 测试处理状态界面 ===");
+    println!("界面内容:\n{}", interface_data);
+    
+    // 基本验证
+    assert!(!interface_data.is_empty(), "界面数据不应为空");
+    assert!(interface_data.contains("请写一个简单的Python程序"), "应该包含用户输入");
+    assert!(interface_data.contains("Combobulating"), "应该包含Claude Code状态");
+    
+    // 活动检测
+    let is_active = is_claude_active(&interface_data);
+    assert!(is_active, "处理状态应该被识别为活动状态");
+    println!("✅ 活动检测正确");
+    
+    // 时间提取
+    let time = extract_execution_time(&interface_data);
+    assert!(time.is_some(), "应该能够提取时间");
+    println!("✅ 时间提取正确: {:?}", time);
+    
+    // 跳过LLM调用逻辑 - 处理状态应该跳过
+    let should_skip = check_if_should_skip_llm_call(&interface_data);
+    assert!(should_skip, "处理状态应该跳过LLM调用");
+    println!("✅ 处理状态判断正确");
+}
+
+/// 测试完成状态界面
+#[test]
+fn test_completed_state_interface() {
+    let interface_data = load_interface_data("completed_state.txt");
+    
+    println!("\n=== 测试完成状态界面 ===");
+    println!("界面内容:\n{}", interface_data);
+    
+    // 基本验证
+    assert!(!interface_data.is_empty(), "界面数据不应为空");
+    
+    // 活动检测 - 完成状态可能不活跃
+    let is_active = is_claude_active(&interface_data);
+    println!("✅ 活动检测结果: {}", is_active);
+    
+    // 时间提取
+    let time = extract_execution_time(&interface_data);
+    println!("✅ 时间提取结果: {:?}", time);
+    
+    // 跳过LLM调用逻辑
+    let should_skip = check_if_should_skip_llm_call(&interface_data);
+    println!("✅ 完成状态跳过判断: {}", should_skip);
 }
 
 /// 测试真实界面数据的边界情况

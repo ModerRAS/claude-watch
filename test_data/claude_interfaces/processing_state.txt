@@ -1,0 +1,32 @@
+
+● 让我先给Claude Code发送一个新任务，让它进入工作状态：
+
+● Bash(tmux send-keys -t 0:6
+      "请写一个简单的Python程序，计算斐波那契数列")
+  ⎿  (No content)
+
+● Bash(sleep 3 && tmux send-keys -t 0:6 "Enter")
+  ⎿  (No content)
+
+> 请写一个简单的Python程序，计算斐波那契数列
+
+● Bash(sleep 5 && tmux capture-pane -t 0:6 -p >
+      test_data/claude_interfaces/working_state.txt)
+  ⎿  (No content)
+
+● 让我等待一会儿再捕获一个处理中的状态：
+
+  Bash(sleep 10 && tmux capture-pane -t 0:6 -p >
+      test_data/claude_interfaces/processing_state.txt)
+  ⎿  Running…
+
+* Combobulating… (105s · ⚒ 47 tokens · esc to interrupt)
+
+╭────────────────────────────────────────────────────────────────╮
+│ >                                                              │
+╰────────────────────────────────────────────────────────────────╯
+  ? for shortcuts                          Bypassing Permissions
+                             Context left until auto-compact: 0%
+
+
+

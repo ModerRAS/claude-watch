@@ -1,0 +1,32 @@
+
+● Bash(sleep 10 && tmux capture-pane -t 0:6 -p >
+      test_data/claude_interfaces/processing_state.txt)
+  ⎿  (No content)
+
+● 现在让我检查捕获的数据：
+
+● Read(test_data/claude_interfaces/interrupted_state.txt)
+  ⎿  Read 33 lines (ctrl+r to expand)
+
+● Read(test_data/claude_interfaces/working_state.txt)
+  ⎿  Read 33 lines (ctrl+r to expand)
+
+● Read(test_data/claude_interfaces/processing_state.txt)
+  ⎿  Read 33 lines (ctrl+r to expand)
+
+● 现在让我等待Claude Code完成响应，捕获一个完成状态的界面：
+
+  Bash(sleep 15 && tmux capture-pane -t 0:6 -p >
+      test_data/claude_interfaces/completed_state.txt)
+  ⎿  Running…
+
+✶ Combobulating… (131s · ⚒ 47 tokens · esc to interrupt)
+
+╭────────────────────────────────────────────────────────────────╮
+│ >                                                              │
+╰────────────────────────────────────────────────────────────────╯
+  ? for shortcuts                          Bypassing Permissions
+                             Context left until auto-compact: 0%
+
+
+
