@@ -317,7 +317,8 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     
     // 首先检查整个文本中是否有Claude Code的标准执行条格式
     // 这是比只检查最后10行更准确的方法
-    let execution_bar_pattern = regex::Regex::new(r"\*[^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
+    // 修复：支持真实Claude Code中使用的各种符号：✶, ✢, ·, ✻, ✽ 等
+    let execution_bar_pattern = regex::Regex::new(r"[\*✶✢·✻✽][^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
     if execution_bar_pattern.is_match(text) {
         // 找到执行条，现在需要判断是否真的在活动
         // 检查是否有明确的活动状态关键词

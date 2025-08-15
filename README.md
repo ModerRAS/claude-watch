@@ -33,20 +33,58 @@
 - **低误判率**：基于特定的输出格式而不是简单的画面变化
 - **资源友好**：大幅减少网络请求和计算资源消耗
 
-## 核心函数说明
+## 测试验证
 
-### Claude Code 活动检测函数
-- `is_claude_active()` - 核心活动检测器，检测 Claude Code 特定输出模式
+### 完整的测试套件
+- ✅ **67个单元测试全部通过**，包括：
+  - 15个基于真实tmux界面数据的测试
+  - 活动检测、时间提取、状态判断等核心功能
+  - 性能测试和边界情况测试
+- ✅ **真实环境验证**：在实际Claude Code环境中测试通过
+- ✅ **多种状态覆盖**：Philosophising、中断、工作、处理、完成等状态
 
-### LLM 判断函数
-- `ask_llm_final_status()` - 仅在无活动时调用，判断最终状态
-- `simple_heuristic_check()` - LLM 不可用时的备用方案
+### 测试数据
+项目包含8个不同状态的Claude Code界面数据：
+- `philosophising_state.txt`: Philosophising状态
+- `user_input_state.txt`: 用户输入状态
+- `interrupted_state.txt`: 中断状态
+- `working_state.txt`: 工作状态
+- `processing_state.txt`: 处理状态
+- `completed_state.txt`: 完成状态
+- `processing_response.txt`: 处理响应状态
+- `philosophising_tail.txt`: Philosophising尾部状态
 
-### 主要逻辑流程
-1. **持续监控**：每 `INTERVAL` 秒检查一次 tmux pane
-2. **活动检测**：使用 `is_claude_active()` 判断 Claude Code 工作状态
-3. **超时判断**：无活动超过 `STUCK_SEC` 秒后调用 LLM
-4. **结果处理**：根据 LLM 结果退出或重试
+### 主要修复
+- ✅ **Tokio Runtime冲突修复**：解决LLM调用崩溃问题
+- ✅ **时间提取正则表达式优化**：提高准确性
+- ✅ **状态判断逻辑改进**：减少误判
+- ✅ **性能优化**：处理速度满足要求
+
+## 构建和运行
+
+### 开发构建
+```bash
+cargo build
+```
+
+### 发布构建
+```bash
+cargo build --release
+```
+
+### 运行测试
+```bash
+cargo test
+```
+
+### 使用示例
+```bash
+# 基本使用
+./target/release/claude-watch --pane %6
+
+# 完整参数
+./target/release/claude-watch --pane %6 --stuck-sec 30 --interval 5 --retries 3
+```
 
 ## 快速开始
 

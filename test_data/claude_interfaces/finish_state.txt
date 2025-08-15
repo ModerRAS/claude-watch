@@ -1,0 +1,50 @@
+
+  发现了Claude Code的真实格式：
+  - ✶ Perusing… (28s · ⚒ 414 tokens · esc to interrupt)
+  - ✢ Perusing… (43s · ⚒ 483 tokens · esc to interrupt)
+  - · Inferring… (1s · ⚒ 3 tokens · esc to interrupt)
+  - ✶ Frolicking… (1s · ⚒ 11 tokens · esc to interrupt)
+
+  3. ✅ 修复了活动检测代码
+
+  问题：原正则表达式 r"\((\d+s)" 只匹配 ( 开头的时间格式
+  修复：改为 r"\b\d+s\b" 匹配任何位置的 数字+s 格式
+
+  4. ✅ 创建了基于真实数据的单元测试
+
+  - 11个新测试全部通过
+  - 总计78个测试全部通过
+  - 测试覆盖了所有真实的Claude Code状态
+
+  测试结果：
+
+  test_real_data_files_exist ... ok
+  test_current_state_with_input ... ok
+  test_perusing_working_state ... ok
+  test_inferring_start_state ... ok
+  test_perusing_working_state_43s ... ok
+  test_frolicking_active_state ... ok
+  test_real_data_time_increasing ... ok
+  test_real_data_core_content_extraction ... ok
+  test_real_data_content_change ... ok
+  test_full_monitoring_flow_with_real_data ... ok
+  test_real_data_performance ... ok
+
+  关键修复：
+
+  1. 活动检测正则表达式：从 r"\((\d+s)" 改为 r"\b\d+s\b"
+  2. 真实数据验证：确保能正确识别各种Claude Code状态
+  3. 测试完整性：从67个测试增加到78个测试
+
+  现在claude-watch能够正确识别真实的Claude Code工作状态，测试完全基于真实的tmux界面数据！
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ >                                                                                                                                                                                                             │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ? for shortcuts                                                                                                                                                                         Bypassing Permissions
+                                                                                                                                                                            Context left until auto-compact: 0%
+
+
+
+
+
