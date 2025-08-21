@@ -15,22 +15,73 @@
 pub fn is_claude_active(text: &str) -> bool {
     let lines: Vec<&str> = text.lines().collect();
     
+    // 预编译正则表达式以提高性能
+    lazy_static::lazy_static! {
+        static ref TIME_PATTERN: regex::Regex = regex::Regex::new(r"\b\d+s\b").unwrap();
+        static ref EXECUTION_BAR_PATTERN: regex::Regex = regex::Regex::new(r"[\*✶✢·✻✽][^)]*\([^)]*(?:esc to interrupt|tokens|Processing|Cogitating|Thinking)[^)]*\)").unwrap();
+        static ref VALID_TIME_PATTERN: regex::Regex = regex::Regex::new(r"\(\d+\s*s").unwrap();
+    }
+    
     // 首先检查整个文本中是否有Claude Code的读秒状态 - 这是最重要的活动指示
     for line in lines.iter() {
         let trimmed = line.trim();
         
-        // 检查Claude Code的标准读秒格式：*(状态)… (时间 · 数量 tokens · esc to interrupt)
-        // 例如：* Herding… (343s · ↑ 14.2k tokens · esc to interrupt)
-        // 或：✶ Perusing… (28s · ⚒ 414 tokens · esc to interrupt)
+        // 检查Claude Code的新格式适配：支持多种格式
+        // 新格式：可能只显示 (esc to interrupt) 而没有完整的时间信息
+        // 标准格式：*(状态)… (时间 · 数量 tokens · esc to interrupt)
+        // 简化格式：*(状态)… (esc to interrupt)
+        
+        // 1. 首先检查是否有执行条格式（包含状态指示符和括号内容）
+        if EXECUTION_BAR_PATTERN.is_match(trimmed) {
+            // 有执行条格式，现在需要判断是否真的在活动
+            
+            // 特殊处理：如果是Done状态，不认为是活动状态
+            if trimmed.contains("Done") {
+                return false; // Done状态不是活动状态
+            }
+            
+            // 检查是否有明确的活动状态关键词
+            let active_keywords = [
+                // 核心深度思考状态
+                "Cogitating", "Herding", "Meandering", "Reticulating", "Thinking", "Philosophising",
+                // 核心处理状态
+                "Processing", "Compiling", "Building", "Executing",
+                // 核心文件操作
+                "Reading", "Writing", "Generating", "Creating", "Analyzing",
+                // 核心工具调用
+                "Calling", "Searching", "Browsing", "Loading", "Saving"
+            ];
+            
+            for keyword in &active_keywords {
+                if trimmed.contains(keyword) {
+                    // 如果有活动状态关键词，还需要检查格式是否有效
+                    if trimmed.contains("tokens") {
+                        // 对于包含tokens的格式，必须要有有效的时间格式
+                        if TIME_PATTERN.is_match(trimmed) && VALID_TIME_PATTERN.is_match(trimmed) {
+                            return true; // 有活动状态关键词和有效时间格式，认为是活动状态
+                        }
+                    } else if trimmed.contains("esc to interrupt") {
+                        // 对于新格式（包含esc to interrupt），只要有活动关键词就认为是活动状态
+                        return true;
+                    }
+                }
+            }
+            
+            // 如果没有明确的活动状态关键词，但有执行条格式和esc to interrupt，也认为是活动状态
+            if trimmed.contains("esc to interrupt") {
+                return true;
+            }
+        }
+        
+        // 2. 检查标准格式：包含 tokens 的完整格式（向后兼容）
         if trimmed.contains('(') && trimmed.contains(')') && trimmed.contains("tokens") {
             // 特殊处理：如果是Done状态，不认为是活动状态
             if trimmed.contains("Done") {
                 return false; // Done状态不是活动状态
             }
             
-            // 检查是否有时间格式（数字+s）在括号内
-            let time_pattern = regex::Regex::new(r"\b\d+s\b").unwrap();
-            if time_pattern.is_match(trimmed) {
+            // 检查是否有有效的时间格式（数字+s）在括号内
+            if TIME_PATTERN.is_match(trimmed) && VALID_TIME_PATTERN.is_match(trimmed) {
                 // 这是标准的Claude Code读秒状态，肯定是活动状态
                 return true;
             }

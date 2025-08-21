@@ -16,6 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 reqwest = { version = "0.12", features = ["json"] }
 async-trait = "0.1"
+lazy_static = "1.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -28,22 +29,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 assert_cmd = "2.0"
 assert_fs = "1.0"
 predicates = "3.0"
-assert_matches = "1.5"
-pretty_assertions = "1.4"
-async-std = "1.12"
-futures = "0.3"
-rand = "0.8"
-chrono = { version = "0.4", features = ["serde"] }
-async-trait = "0.1"
-
-# Musl构建配置
-[package.metadata.cross.target.x86_64-unknown-linux-musl]
-pre-built = true
-
-# 为musl构建调整依赖
-[target.x86_64-unknown-linux-musl.dependencies]
-# 使用原生tls实现，避免openssl的复杂依赖
-reqwest = { version = "0.12", features = ["json", "native-tls-vendored"] }
 
 [[bench]]
 name = "performance_bench"

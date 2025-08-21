@@ -29,16 +29,65 @@ pub fn reset_time_tracker() {
     // 在实际使用中，这不会成为问题
 }
 
-/// 提取Claude Code执行条中的时间值
+/// 预编译正则表达式以提高性能
+lazy_static::lazy_static! {
+    static ref TIME_PATTERN: regex::Regex = regex::Regex::new(r"\((\d+)s[^)]*\)").unwrap();
+    static ref SIMPLE_TIME_PATTERN: regex::Regex = regex::Regex::new(r"(\d+)s").unwrap();
+    static ref FLEXIBLE_TIME_PATTERN: regex::Regex = regex::Regex::new(r"\b(\d+)s\b").unwrap();
+    static ref EXECUTION_BAR_PATTERN: regex::Regex = regex::Regex::new(r"[\*✶✢·✻✽][^)]*\([^)]*(?:esc to interrupt|tokens|Processing|Cogitating|Thinking)[^)]*\)").unwrap();
+    static ref TOKEN_PATTERNS: Vec<regex::Regex> = vec![
+        regex::Regex::new(r"(\d+)\s*tokens?").unwrap(),
+        regex::Regex::new(r"↑\s*(\d+)\s*tokens?").unwrap(),
+        regex::Regex::new(r"↓\s*(\d+)\s*tokens?").unwrap(),
+        regex::Regex::new(r"⚒\s*(\d+)\s*tokens?").unwrap(),
+    ];
+    static ref SYSTEM_INFO_PATTERNS: Vec<regex::Regex> = vec![
+        regex::Regex::new(r"\?\s+for\s+shortcuts").unwrap(),
+        regex::Regex::new(r"Bypassing\s+Permissions").unwrap(),
+        regex::Regex::new(r"╭─*╮").unwrap(),
+        regex::Regex::new(r"╰─*╯").unwrap(),
+        regex::Regex::new(r"│.*│").unwrap(),
+    ];
+    static ref STATUS_PATTERNS: Vec<regex::Regex> = vec![
+        regex::Regex::new(r"✽").unwrap(),
+        regex::Regex::new(r"✶").unwrap(),
+        regex::Regex::new(r"●").unwrap(),
+        regex::Regex::new(r"◦").unwrap(),
+        regex::Regex::new(r"▪").unwrap(),
+        regex::Regex::new(r"▬").unwrap(),
+        regex::Regex::new(r"Cogitating").unwrap(),
+        regex::Regex::new(r"Contemplating").unwrap(),
+        regex::Regex::new(r"Herding").unwrap(),
+        regex::Regex::new(r"Meandering").unwrap(),
+        regex::Regex::new(r"Reticulating").unwrap(),
+    ];
+}
+
+/// 提取Claude Code执行条中的时间值 - 新格式适配
 pub fn extract_execution_time(text: &str) -> Option<u64> {
-    // 匹配格式：(数字s) - 更宽松的模式，能从复杂格式中提取
+    // 1. 首先尝试标准格式：(数字s · 其他内容)
     // 修复：允许在s和)之间有其他字符（如Unicode空格、tokens等）
-    let time_pattern = regex::Regex::new(r"\((\d+)s[^)]*\)").unwrap();
-    if let Some(caps) = time_pattern.captures(text) {
+    if let Some(caps) = TIME_PATTERN.captures(text) {
         if let Some(time_str) = caps.get(1) {
             return time_str.as_str().parse::<u64>().ok();
         }
     }
+    
+    // 2. 尝试新格式：简化格式中的时间提取
+    // 新格式可能没有完整的tokens信息，但仍然有时间信息
+    if let Some(caps) = SIMPLE_TIME_PATTERN.captures(text) {
+        if let Some(time_str) = caps.get(1) {
+            return time_str.as_str().parse::<u64>().ok();
+        }
+    }
+    
+    // 3. 尝试更灵活的格式：时间可能在括号外
+    if let Some(caps) = FLEXIBLE_TIME_PATTERN.captures(text) {
+        if let Some(time_str) = caps.get(1) {
+            return time_str.as_str().parse::<u64>().ok();
+        }
+    }
+    
     None
 }
 
@@ -114,7 +163,7 @@ pub async fn run_monitoring_loop(
             *last_active = Instant::now();
             *retry_count = 0;
             if has_content_changed {
-println!("🔄 检测到内容变化，Claude Code 正在工作中...");
+                println!("🔄 检测到内容变化，Claude Code 正在工作中...");
             } else {
                 println!("🔄 Claude Code 正在工作中...");
             }
@@ -315,11 +364,20 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     let last_lines: Vec<&str> = lines.iter().rev().take(10).cloned().collect();
     let last_content = last_lines.join("\n");
     
-    // 首先检查整个文本中是否有Claude Code的标准执行条格式
-    // 这是比只检查最后10行更准确的方法
-    // 修复：支持真实Claude Code中使用的各种符号：✶, ✢, ·, ✻, ✽ 等
-    let execution_bar_pattern = regex::Regex::new(r"[\*✶✢·✻✽][^)]*\([^)]*\d+s[^)]*tokens[^)]*esc to interrupt\)").unwrap();
-    if execution_bar_pattern.is_match(text) {
+    // 首先检查明确的中断状态 - 这些状态不应该跳过LLM调用（优先检查）
+    if text.contains("Interrupted by user") ||
+       text.contains("Aborted by user") ||
+       text.contains("Cancelled by user") {
+        return false; // 明确中断状态，不跳过LLM调用
+    }
+    
+    // 然后检查整个文本中是否有Claude Code的执行条格式 - 新格式适配
+    // 支持新格式：可能只有 (esc to interrupt) 而没有完整的时间信息
+    // 标准格式：*(状态)… (时间 · 数量 tokens · esc to interrupt)
+    // 简化格式：*(状态)… (esc to interrupt)
+    
+    // 1. 检查是否有执行条格式
+    if EXECUTION_BAR_PATTERN.is_match(text) {
         // 找到执行条，现在需要判断是否真的在活动
         // 检查是否有明确的活动状态关键词
         let active_keywords = [
@@ -334,7 +392,8 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         ];
         
         for keyword in &active_keywords {
-            if text.contains(keyword) && text.contains("tokens") {
+            // 新格式适配：支持没有 tokens 的情况
+            if text.contains(keyword) && (text.contains("tokens") || text.contains("esc to interrupt")) {
                 return true; // 有活动状态关键词和执行条，认为正在活动
             }
         }
@@ -349,16 +408,8 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
         }
         
         // 作为备选，如果只有执行条但没有其他明显的停止指示，也认为可能仍在活动
-        return !text.contains("Interrupted by user") && 
-               !text.contains("Aborted by user") && 
-               !text.contains("Cancelled by user");
-    }
-    
-    // 检查明确的中断状态 - 这些状态不应该跳过LLM调用
-    if text.contains("Interrupted by user") ||
-       text.contains("Aborted by user") ||
-       text.contains("Cancelled by user") {
-        return false; // 明确中断状态，不跳过LLM调用
+        // 注意：此时已经确认没有中断状态（因为前面已经检查过了）
+        return true;
     }
     
     // 检查是否在命令提示符状态 - Claude Code在命令提示符状态时是空闲的
@@ -396,8 +447,7 @@ pub fn check_if_should_skip_llm_call(text: &str) -> bool {
     
     // 检查是否有时间计数器（如 "104s"）但没有其他活动指示
     // 这种情况可能是在等待外部操作完成
-    let time_pattern = regex::Regex::new(r"\d+s").unwrap();
-    if time_pattern.is_match(&last_content) {
+    if FLEXIBLE_TIME_PATTERN.is_match(&last_content) {
         // 如果有时间计数器但没有明显的完成或错误标志，可能仍在处理
         return !last_content.contains("Error") && 
                !last_content.contains("Failed") &&
@@ -477,8 +527,11 @@ pub fn has_substantial_progress(text: &str) -> bool {
     let recent_lines: Vec<&str> = lines.iter().rev().take(5).cloned().collect();
     let recent_content = recent_lines.join("\n");
     
-    // 检查是否有新的实质性输出（不只是时间计数器）
+    // 检查是否有新的实质性输出（不只是时间计数器）- 新格式适配
     let substantial_indicators = [
+        // 新格式支持：esc to interrupt 表示活动状态
+        "esc to interrupt",
+        
         // 新的思考状态
         "Cogitating",
         "Thinking",
@@ -549,8 +602,11 @@ pub fn is_just_time_counter(text: &str) -> bool {
     let trimmed = text.trim();
     
     // 检查是否主要是时间计数器格式
-    let time_pattern = regex::Regex::new(r"^\*?[^a-zA-Z]*(\d+s)[^a-zA-Z]*(.*)$").unwrap();
-    if let Some(caps) = time_pattern.captures(trimmed) {
+    lazy_static::lazy_static! {
+        static ref TIME_COUNTER_PATTERN: regex::Regex = regex::Regex::new(r"^\*?[^a-zA-Z]*(\d+s)[^a-zA-Z]*(.*)$").unwrap();
+    }
+    
+    if let Some(caps) = TIME_COUNTER_PATTERN.captures(trimmed) {
         let _time_part = &caps[1]; // "104s" 部分
         let rest_part = &caps[2]; // 剩余部分
         
@@ -602,44 +658,21 @@ pub fn extract_core_content(text: &str) -> String {
     processed = time_pattern.replace_all(&processed, "[TIME]").to_string();
     
     // 2. 移除token计数变化 - 替换token相关的数字
-    let token_patterns = [
-        r"(\d+)\s*tokens?",
-        r"↑\s*(\d+)\s*tokens?",
-        r"↓\s*(\d+)\s*tokens?",
-        r"⚒\s*(\d+)\s*tokens?",
-    ];
-    
-    for pattern in &token_patterns {
-        let token_regex = regex::Regex::new(pattern).unwrap();
-        processed = token_regex.replace_all(&processed, "[TOKENS]").to_string();
+    for pattern in &*TOKEN_PATTERNS {
+        processed = pattern.replace_all(&processed, "[TOKENS]").to_string();
     }
     
     // 3. 移除系统界面信息变化 - 这些是Claude Code界面的辅助信息
-    let system_info_patterns = [
-        r"\?\s+for\s+shortcuts",
-        r"Bypassing\s+Permissions",
-        r"╭─*╮",
-        r"╰─*╯",
-        r"│.*│",  // 移除边框线内容
-    ];
-    
-    for pattern in &system_info_patterns {
-        let system_regex = regex::Regex::new(pattern).unwrap();
-        processed = system_regex.replace_all(&processed, "").to_string();
+    for pattern in &*SYSTEM_INFO_PATTERNS {
+        processed = pattern.replace_all(&processed, "").to_string();
     }
     
     // 4. 标准化空白字符 - 移除多余的空格、换行等
     processed = regex::Regex::new(r"\s+").unwrap().replace_all(&processed.trim(), " ").to_string();
     
     // 5. 移除常见的状态指示符变化 - 这些会频繁变化但不代表实质性活动
-    let status_patterns = [
-        r"✽", r"✶", r"●", r"◦", r"▪", r"▬",  // 状态图标
-        r"Cogitating", r"Contemplating", r"Herding", r"Meandering", r"Reticulating",  // 状态词汇（这些词本身会变化，但如果其他内容没变，不算实质性变化）
-    ];
-    
-    for pattern in &status_patterns {
-        let status_regex = regex::Regex::new(pattern).unwrap();
-        processed = status_regex.replace_all(&processed, "[STATUS]").to_string();
+    for pattern in &*STATUS_PATTERNS {
+        processed = pattern.replace_all(&processed, "[STATUS]").to_string();
     }
     
     // 最终清理：移除连续的替换标记和多余空格
