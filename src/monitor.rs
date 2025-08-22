@@ -490,7 +490,7 @@ async fn attempt_llm_activation(config: &Config, pane: &str) -> Result<bool, Str
 请只返回要说的话，不要任何解释或其他内容。"#;
     
     // 调用LLM生成激活消息
-    match crate::llm::ask_llm_for_activation(activation_prompt, &config.llm.backend, config).await {
+    match crate::llm::ask_llm_for_activation(activation_prompt, &config.llm.backend, config) {
         Ok(activation_msg) => {
             let activation_message = activation_msg;
             println!("🤖 LLM生成激活消息: {}", activation_message);
